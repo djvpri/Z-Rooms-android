@@ -5,13 +5,14 @@
 # lalu memeriksa isi APK. Skrip ini membangun dari NOL (clean) supaya tidak
 # ada kelas lama yang membuat pemeriksaan lolos palsu.
 #
-# Enam tahap, semuanya harus lulus — tiga di antaranya uji gigit:
+# TUJUH tahap, semuanya harus lulus — tiga di antaranya uji gigit:
 #   1. build bersih dari nol (debug + rilis)
-#   2. periksa isi APK (15 blok)
-#   3. buktikan checker MENGGIGIT kalau plugin Kotlin dimatikan
-#   4. buktikan checker MENGGIGIT kalau alamat melenceng dari alamat.json
-#   5. buktikan checker MENGGIGIT kalau versi di alamat.json tak cocok APK
-#   6. buktikan uji gigit 3–5 sendiri masih hidup (polanya belum basi)
+#   2. periksa isi APK (butuh Android SDK)
+#   3. periksa berkas WebView: pemilih berkas & jembatan JS (tanpa SDK)
+#   4. buktikan checker MENGGIGIT kalau plugin Kotlin dimatikan
+#   5. buktikan checker MENGGIGIT kalau alamat melenceng dari alamat.json
+#   6. buktikan checker MENGGIGIT kalau versi di alamat.json tak cocok APK
+#   7. buktikan uji gigit 4–6 sendiri masih hidup (polanya belum basi)
 set -u
 
 AKAR="C:/Users/KBK065/zrooms-android"
@@ -23,10 +24,11 @@ cd "$AKAR" || exit 2
 GAGAL=0
 LOG_BANGUN=/tmp/hermes-verify-build.log
 LOG_PERIKSA=/tmp/hermes-verify-check.log
+LOG_WEBVIEW=/tmp/hermes-verify-webview.log
 LOG_GIGIT=/tmp/hermes-verify-gigit.log
 CADANGAN=/tmp/hermes-verify-bg.bak
 
-echo "=== 1/3 build bersih dari nol (debug + rilis) ==="
+echo "=== 1/7 build bersih dari nol (debug + rilis) ==="
 ./gradlew.bat clean assembleDebug assembleRelease --no-daemon > "$LOG_BANGUN" 2>&1
 B=$?
 echo "build_exit=$B"
@@ -36,7 +38,7 @@ if [ "$B" -ne 0 ]; then
 fi
 
 echo
-echo "=== 2/3 isi APK ==="
+echo "=== 2/7 isi APK ==="
 node scripts/check-android-apk.mjs > "$LOG_PERIKSA" 2>&1
 C=$?
 echo "check_exit=$C"
@@ -44,7 +46,18 @@ grep -E "^  (ok|--)|blok lulus" "$LOG_PERIKSA"
 if [ "$C" -ne 0 ]; then GAGAL=1; fi
 
 echo
-echo "=== 3/3 checker MENGGIGIT kalau plugin Kotlin dimatikan ==="
+echo "=== 3/7 berkas WebView: pemilih berkas & jembatan (tanpa SDK) ==="
+# Terpisah dari check-android-apk.mjs karena pemeriksaan ini murni baca kode:
+# tak butuh aapt2/apkanalyzer, jadi bisa jalan di WSL/CI juga. Menjaga bug
+# "tombol kamera tak merespon" supaya tak kembali.
+node scripts/check-berkas-webview.mjs > "$LOG_WEBVIEW" 2>&1
+W=$?
+echo "webview_exit=$W"
+grep -E "^  (ok|--)|blok lulus" "$LOG_WEBVIEW"
+if [ "$W" -ne 0 ]; then GAGAL=1; fi
+
+echo
+echo "=== 4/7 checker MENGGIGIT kalau plugin Kotlin dimatikan ==="
 cp app/build.gradle.kts "$CADANGAN"
 # Lewat python, bukan sed: sed dengan \n kena blokir perintah agen.
 python - "$AKAR/app/build.gradle.kts" <<'PY'
@@ -66,7 +79,7 @@ if [ "$G" -eq 0 ]; then
 fi
 
 echo
-echo "=== 4/4 checker MENGGIGIT kalau alamat situs melenceng ==="
+echo "=== 5/7 checker MENGGIGIT kalau alamat situs melenceng ==="
 # Dialihkan dari MainActivity.kt ke alamat.json — sejak 8765348 alamat hanya
 # hidup di sana, MainActivity memakai BuildConfig.BERANDA. Versi lama mengganti
 # literal di MainActivity.kt; pola itu sudah tak ada, jadi tahap ini MATI
@@ -96,7 +109,7 @@ if [ "$A" -eq 0 ]; then
 fi
 
 echo
-echo "=== 5/5 checker MENGGIGIT kalau versi di alamat.json tak dicatat di APK ==="
+echo "=== 6/7 checker MENGGIGIT kalau versi di alamat.json tak dicatat di APK ==="
 # Versi berbeda dari alamat: memastikan blok versi benar-benar membaca APK,
 # bukan cuma membaca alamat.json lalu membandingkannya dengan dirinya sendiri.
 cp alamat.json "$CADANGAN.json"
@@ -117,7 +130,7 @@ if [ "$V" -eq 0 ]; then
 fi
 
 echo
-echo "=== 6/6 uji gigitnya sendiri masih hidup (pola tak basi) ==="
+echo "=== 7/7 uji gigitnya sendiri masih hidup (pola tak basi) ==="
 # Menjalankan ulang logika uji gigit di atas terhadap salinan repo. Kalau salah
 # satu pola di Alamat.json / build.gradle.kts hilang, tahap 3–5 akan berhenti
 # diam-diam dan seluruh "SEMUA LULUS" jadi bohong.

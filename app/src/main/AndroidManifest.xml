@@ -7,6 +7,20 @@
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
+    <!-- Foto KTP penyewa di halaman booking diambil dari kamera. Ini izin
+         "kamera ada di perangkat", BUKAN izin memakai kamera: aplikasi kamera
+         yang dipanggil lewat ACTION_IMAGE_CAPTURE meminta izinnya sendiri, jadi
+         Z-Rooms tak perlu CAMERA dan tak ada dialog izin tambahan saat memotret.
+
+         Tanpa baris ini, Play Store menyembunyikan aplikasi dari perangkat
+         tanpa kamera belakang; dengan baris ini, perangkat tanpa kamera tetap
+         bisa memasang dan tombol "Pilih file" tetap jalan. -->
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.camera.autofocus"
+        android:required="false" />
 
     <application
         android:allowBackup="false"

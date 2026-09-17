@@ -143,6 +143,63 @@ blok('cookie pihak-ketiga dinyalakan (syarat login NextAuth)', () => {
     'tanpa ini cookie __Host-authjs ditolak dan login tak nyangkut')
 })
 
+blok('pemilih berkas & kamera dipasang (tombol booking tak boleh diam)', () => {
+  // Bug nyata: kasir menekan "Kamera" / "Pilih file" di tab booking baru dan
+  // tak ada yang terjadi, tanpa pesan apa pun. Sebabnya WebView TIDAK punya UI
+  // pemilih berkas sendiri — tanpa onShowFileChooser, <input type="file">
+  // diabaikan diam-diam.
+  //
+  // Diperiksa dari KODE SUMBER, bukan DEX: nama metode bisa dipangkas R8, dan
+  // yang penting perilakunya ada di sumber yang dibangun.
+  const src = readFileSync(
+    join(AKAR, 'app/src/main/java/com/zrooms/app/MainActivity.kt'), 'utf8')
+
+  assert.match(src, /override fun onShowFileChooser\(/,
+    'onShowFileChooser tidak ada — <input type="file"> akan diam total')
+  assert.match(src, /FileChooserParams\.parseResult\(/,
+    'hasil pemilih tak diteruskan balik ke WebView')
+  // Callback WAJIB dipanggil, termasuk saat dibatalkan. Kalau tidak, halaman
+  // web menunggu selamanya dan tombolnya tampak rusak padahal cuma dibatalkan.
+  assert.match(src, /registerForActivityResult\(/,
+    'Activity Result API tidak dipakai untuk menerima hasil pemilih')
+  // ACTION_IMAGE_CAPTURE untuk capture="environment" (tombol "Kamera"),
+  // ACTION_GET_CONTENT dari createIntent() untuk "Pilih file".
+  assert.match(src, /ACTION_IMAGE_CAPTURE/,
+    'tombol "Kamera" tidak memakai ACTION_IMAGE_CAPTURE')
+  assert.match(src, /params\.createIntent\(\)/,
+    'tombol "Pilih file" tidak memakai createIntent() (accept-types hilang)')
+
+  // isCaptureEnabled baru ada di API 30 sementara minSdk 24 — tanpa penjaga
+  // versi, aplikasi crash di Android 7-10.
+  //
+  // Pencocokan literal, bukan regex: nama konstanta ini panjang dan bertitik,
+  // dan pola regex untuknya gampang salah tanpa terlihat.
+  assert.ok(
+    src.includes('Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && params.isCaptureEnabled'),
+    'isCaptureEnabled dipanggil tanpa penjaga versi → crash di Android 7-10')
+})
+
+blok('hanya satu WebViewClient (yang kedua menimpa yang pertama)', () => {
+  // Dua penugasan `web.webViewClient` membuat yang terakhir menang, dan
+  // shouldOverrideUrlLoading (tautan luar ke browser) mati tanpa gejala.
+  const src = readFileSync(
+    join(AKAR, 'app/src/main/java/com/zrooms/app/MainActivity.kt'), 'utf8')
+  const n = (src.match(/^\s*web\.webViewClient\s*=/gm) ?? []).length
+  assert.equal(n, 1, `web.webViewClient ditugaskan ${n} kali, harus 1`)
+})
+
+blok('jembatan JS hanya untuk host ZXRoom', () => {
+  // addJavascriptInterface bisa dipanggil skrip mana pun yang termuat di
+  // WebView — tanpa syarat host, situs pihak ketiga bisa memanggilnya.
+  const src = readFileSync(
+    join(AKAR, 'app/src/main/java/com/zrooms/app/MainActivity.kt'), 'utf8')
+  const i = src.indexOf('addJavascriptInterface')
+  assert.ok(i > -1, 'jembatan ZXR_APK tidak dipasang')
+  const sebelum = src.slice(Math.max(0, i - 400), i)
+  assert.match(sebelum, /if \(url\.startsWith\(BERANDA\)\)/,
+    'addJavascriptInterface dipasang tanpa batasan host')
+})
+
 blok('alamat situs menunjuk host produksi Z-Rooms, dengan HTTPS', () => {
   const janji = JSON.parse(readFileSync(join(AKAR, 'alamat.json'), 'utf8'))
   assert.match(janji.beranda, /^https:\/\/zxroom\.zomet\.my\.id$/,
