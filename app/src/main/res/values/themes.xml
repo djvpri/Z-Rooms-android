@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Induk AppCompat: MainActivity mewarisi AppCompatActivity supaya
+         komponen lama (ProgressBar) seragam di semua versi Android. -->
+    <style name="Theme.ZRooms" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:statusBarColor">#0F766E</item>
+        <item name="android:windowBackground">#FFFFFF</item>
+    </style>
+</resources>

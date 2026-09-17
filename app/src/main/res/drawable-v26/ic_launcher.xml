@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 8+ memakai lapisan adaptif (latar + depan bisa dipisah bentuknya).
+     Android lama memakai `ikon_depan` langsung lewat drawable/ic_launcher.xml
+     di folder values — jadi hanya satu berkas ini untuk semua versi. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ikon_latar" />
+    <foreground android:drawable="@drawable/ikon_depan" />
+</adaptive-icon>

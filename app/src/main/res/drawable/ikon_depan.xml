@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Kunci: dua pintu ditumpuk, lambang kamar. Digambar sebagai vector supaya
+     tak perlu berkas PNG di lima kerapatan layar. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Badan pintu -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36,30 h36 a4,4 0 0 1 4,4 v44 a4,4 0 0 1 -4,4 h-36 a4,4 0 0 1 -4,-4 v-44 a4,4 0 0 1 4,-4 z" />
+    <!-- Engsel, digambar sebagai celah latar -->
+    <path
+        android:fillColor="#0F766E"
+        android:pathData="M62,52 m-3,0 a3,3 0 1 0 6,0 a3,3 0 1 0 -6,0" />
+    <!-- Atap miring di atas pintu -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,20 L76,36 H32 Z" />
+
+</vector>
