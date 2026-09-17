@@ -10,7 +10,7 @@
 
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { inflateRawSync } from 'node:zlib'
 
@@ -231,9 +231,35 @@ if (existsSync(APK_RILIS)) {
     assert.ok(!/CN=Android Debug/.test(out), 'APK rilis bertanda tangan debug')
   })
 
-  blok('versi rilis bertanda tangan sama dengan debug (satu basis kode)', () => {
-    const out = bacaDex(APK_RILIS)
-    assert.ok(out.includes('com.zrooms.app.MainActivity'), 'MainActivity tak ada di DEX rilis')
+  blok('versi rilis memakai sertifikat yang sama dengan APK rilis resmi', () => {
+    // Sebelumnya blok ini bernama "tanda tangan sama dengan debug" tapi isinya
+    // hanya memeriksa MainActivity ada di DEX — hal yang sudah diperiksa blok
+    // di atasnya. Nama menjanjikan pemeriksaan tanda tangan, isinya tidak.
+    //
+    // Yang benar-benar perlu dijaga: sidik jari sertifikat rilis harus SAMA
+    // dengan APK rilis yang sudah beredar (rilis/). Android menolak memasang
+    // APK dengan tanda tangan berbeda, jadi kalau keystore produksi hilang dan
+    // build jatuh ke keystore debug, rilis baru TIDAK bisa menimpa yang lama —
+    // dan itu baru ketahuan saat kasir memasangnya.
+    const keluaran = execFileSync('cmd.exe',
+      ['/c', AKSIGNER, 'verify', '--print-certs', APK_RILIS],
+      { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
+    const sha = keluaran.match(/SHA-256 digest: ([0-9a-f]+)/i)
+    assert.ok(sha, 'apksigner tak melaporkan SHA-256 sertifikat')
+
+    // APK rilis yang diarsipkan di rilis/ — patokan tanda tangan resmi.
+    const arsip = readdirSync(join(AKAR, 'rilis')).filter((f) => f.endsWith('.apk'))
+    assert.ok(arsip.length > 0, 'tak ada APK arsip di rilis/ — tak ada patokan tanda tangan')
+    const acuan = join(AKAR, 'rilis', arsip.sort().pop())
+    const keluaranAcuan = execFileSync('cmd.exe',
+      ['/c', AKSIGNER, 'verify', '--print-certs', acuan],
+      { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
+    const shaAcuan = keluaranAcuan.match(/SHA-256 digest: ([0-9a-f]+)/i)
+    assert.ok(shaAcuan, 'apksigner tak melaporkan SHA-256 APK arsip')
+
+    assert.equal(sha[1].toLowerCase(), shaAcuan[1].toLowerCase(),
+      `sertifikat rilis berbeda dari ${arsip.sort().pop()} — rilis ini tak bisa `
+      + 'menimpa versi resmi di perangkat kasir')
   })
 } else {
   console.log('  --  APK rilis belum dibangun; blok rilis dilewati')
