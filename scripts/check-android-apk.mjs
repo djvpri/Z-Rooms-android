@@ -12,6 +12,7 @@ import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { inflateRawSync } from 'node:zlib'
 
 const AKAR = 'C:/Users/KBK065/zrooms-android'
 const APK = join(AKAR, 'app/build/outputs/apk/debug/app-debug.apk')
@@ -38,6 +39,40 @@ function bacaDex(apk) {
     encoding: 'utf8',
     maxBuffer: 128 * 1024 * 1024,
   })
+}
+
+/**
+ * Cari semua untai teks di dalam seluruh .dex, apa adanya.
+ *
+ * Kenapa tidak pakai `apkanalyzer dex packages`: perintah itu hanya
+ * mencetak nama kelas/metode, BUKAN tabel string. Alamat situs disimpan
+ * sebagai untai, jadi lewat sana ia tak akan pernah terlihat walau ada.
+ *
+ * Juga: D8 memecah untai panjang, jadi `https://zxroom.zomet.my.id` bisa
+ * tersimpan terpisah. Karena itu yang dicari potongan tanpa skema.
+ */
+function cariUntai(apk, potongan) {
+  const buf = readFileSync(apk)
+  const isi = []
+  let p = 0
+  // Telusuri entri zip secara kasar: cari signature lokal "PK\x03\x04",
+  // lalu baca nama + data. Cukup untuk mengambil seluruh .dex.
+  while (p < buf.length - 30) {
+    if (buf.readUInt32LE(p) !== 0x04034b50) { p++; continue }
+    const metode = buf.readUInt16LE(p + 8)
+    const ukuranPadat = buf.readUInt32LE(p + 18)
+    const namaPanjang = buf.readUInt16LE(p + 26)
+    const tambahanPanjang = buf.readUInt16LE(p + 28)
+    const nama = buf.toString('utf8', p + 30, p + 30 + namaPanjang)
+    const mulai = p + 30 + namaPanjang + tambahanPanjang
+    const padat = buf.subarray(mulai, mulai + ukuranPadat)
+    if (nama.endsWith('.dex')) {
+      isi.push(metode === 8 ? inflateRawSync(padat) : padat)
+    }
+    p = mulai + ukuranPadat
+  }
+  const gabung = Buffer.concat(isi).toString('latin1')
+  return gabung.includes(potongan)
 }
 
 console.log('check-android-apk: proyek WebView Z-Rooms\n')
@@ -113,6 +148,39 @@ blok('alamat situs menunjuk host produksi Z-Rooms', () => {
     join(AKAR, 'app/src/main/java/com/zrooms/app/MainActivity.kt'), 'utf8')
   assert.match(src, /BERANDA = "https:\/\/zxroom\.zomet\.my\.id"/,
     'alamat beranda salah atau bukan HTTPS')
+})
+
+blok('satu sumber kebenaran: alamat.json vs MainActivity vs build.gradle.kts', () => {
+  // Tiga tempat menyebut alamat/versi. Kalau salah satu diubah dan yang lain
+  // tidak, aplikasi memuat situs lama tanpa gejala apa pun. Blok ini yang
+  // memperingatkan. Ubah alamat.json lebih dulu.
+  const janji = JSON.parse(readFileSync(join(AKAR, 'alamat.json'), 'utf8'))
+  assert.ok(janji.beranda, 'alamat.json: kolom "beranda" hilang')
+
+  const kotlin = readFileSync(
+    join(AKAR, 'app/src/main/java/com/zrooms/app/MainActivity.kt'), 'utf8')
+  assert.ok(kotlin.includes(`BERANDA = "${janji.beranda}"`),
+    `MainActivity.BERANDA tidak sama dengan alamat.json ("${janji.beranda}")`)
+
+  const app = readFileSync(join(AKAR, 'app/build.gradle.kts'), 'utf8')
+  assert.ok(app.includes(`applicationId = "${janji.idPaket}"`),
+    `applicationId tidak sama dengan alamat.json ("${janji.idPaket}")`)
+  assert.ok(app.includes(`versionName = "${janji.versiNama}"`),
+    `versionName tidak sama dengan alamat.json ("${janji.versiNama}")`)
+
+  // APK yang sudah dibangun harus memakai alamat yang sama juga.
+  if (existsSync(APK)) {
+    const badging = execFileSync(AAPT, ['dump', 'badging', APK], { encoding: 'utf8' })
+    assert.ok(badging.includes(`package: name='${janji.idPaket}'`),
+      'APK memakai applicationId lama — bangun ulang')
+    assert.ok(badging.includes(`versionName='${janji.versiNama}'`),
+      'APK memakai versionName lama — bangun ulang')
+    // Alamat dicek lewat tabel untai DEX, tanpa skema: D8 memecah untai
+    // panjang, jadi "https://" dan "zxroom.zomet.my.id" bisa terpisah.
+    const tanpaSkema = janji.beranda.replace(/^https?:\/\//, '')
+    assert.ok(cariUntai(APK, tanpaSkema),
+      'alamat di dalam APK berbeda dari alamat.json — bangun ulang')
+  }
 })
 
 // --- APK rilis: hanya diperiksa kalau sudah dibangun -----------------------
