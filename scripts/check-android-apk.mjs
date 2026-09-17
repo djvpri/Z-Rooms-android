@@ -14,11 +14,30 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { inflateRawSync } from 'node:zlib'
 
-const AKAR = 'C:/Users/KBK065/zrooms-android'
+// Akar proyek & SDK dicari, bukan ditulis mati.
+//
+// Sebelumnya keduanya dipatok ke path Windows (`C:/Users/KBK065/...`,
+// `C:/Android/Sdk`), sehingga pemeriksaan ini hanya bisa jalan di satu mesin —
+// tak bisa di WSL, CI, atau mesin lain, dan gagal dengan pesan yang
+// membingungkan kalau folder proyeknya dipindah.
+//
+// Urutan: argumen CLI, lalu variabel lingkungan, lalu lokasi lazim, lalu
+// disimpulkan dari letak berkas skrip ini (skrip selalu ada di <akar>/scripts).
+import { dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const AKAR = process.argv[2]
+  ?? process.env.ZROOMS_AKAR
+  ?? join(dirname(fileURLToPath(import.meta.url)), '..')
+const SDK = process.env.ANDROID_HOME ?? process.env.ANDROID_SDK_ROOT ?? ''
+
+/** Nama biner build-tools berbeda per OS (.exe/.bat di Windows). */
+const ext = process.platform === 'win32' ? '.exe' : ''
+const extBat = process.platform === 'win32' ? '.bat' : ''
+
 const APK = join(AKAR, 'app/build/outputs/apk/debug/app-debug.apk')
-const SDK = 'C:/Android/Sdk'
-const AAPT = join(SDK, 'build-tools/35.0.0/aapt2.exe')
-const ANALYZER = join(SDK, 'cmdline-tools/latest/bin/apkanalyzer.bat')
+const AAPT = SDK ? join(SDK, `build-tools/35.0.0/aapt2${ext}`) : ''
+const ANALYZER = SDK ? join(SDK, `cmdline-tools/latest/bin/apkanalyzer${extBat}`) : ''
 
 let lulus = 0
 function blok(nama, fn) {
@@ -31,14 +50,17 @@ function blok(nama, fn) {
  * Baca daftar kelas di dalam DEX.
  *
  * `execFileSync` di Node TIDAK bisa meluncurkan `.bat` di Windows (EINVAL),
- * jadi dipanggil lewat cmd.exe. Keluarannya besar, karena itu di-buffer
- * sendiri, bukan lewat maxBuffer execFileSync.
+ * jadi di Windows dipanggil lewat cmd.exe. Di Linux/macOS `apkanalyzer` adalah
+ * skrip yang bisa dijalankan langsung — dan `cmd.exe` tentu tak ada di sana.
+ * Keluarannya besar, karena itu di-buffer sendiri.
  */
 function bacaDex(apk) {
-  return execFileSync('cmd.exe', ['/c', ANALYZER, 'dex', 'packages', apk], {
-    encoding: 'utf8',
-    maxBuffer: 128 * 1024 * 1024,
-  })
+  const args = ['dex', 'packages', apk]
+  return execFileSync(
+    process.platform === 'win32' ? 'cmd.exe' : ANALYZER,
+    process.platform === 'win32' ? ['/c', ANALYZER, ...args] : args,
+    { encoding: 'utf8', maxBuffer: 128 * 1024 * 1024 },
+  )
 }
 
 /**
@@ -84,9 +106,16 @@ blok('proyek ada di disk', () => {
 })
 
 blok('local.properties memakai garis miring depan (jebakan Windows)', () => {
+  // Yang dijaga: di Windows, `sdk.dir=C:\Android\Sdk` (garis miring terbalik)
+  // membuat Gradle gagal tanpa pesan yang jelas. Garis miring depan (C:/...)
+  // dan path gaya Unix dua-duanya diterima — yang ditolak hanya garis miring
+  // terbalik, supaya pemeriksaan ini tetap berguna di WSL/CI.
   const lp = readFileSync(join(AKAR, 'local.properties'), 'utf8')
-  assert.match(lp, /sdk\.dir=[A-Z]:\/[^\s\\]+/,
-    'sdk.dir harus C:/Android/Sdk — garis miring terbalik bikin build gagal senyap')
+  const baris = lp.split('\n').find((b) => b.startsWith('sdk.dir='))
+  assert.ok(baris, 'local.properties tak memuat sdk.dir')
+  assert.ok(!baris.includes('\\'),
+    'sdk.dir memakai garis miring terbalik — bikin build gagal senyap di Windows')
+  assert.match(baris, /sdk\.dir=(\/|[A-Z]:\/).+/, 'sdk.dir harus path absolut')
 })
 
 blok('plugin Kotlin dipasang (kalau tidak, .kt diabaikan tanpa peringatan)', () => {
@@ -191,12 +220,15 @@ blok('hanya satu WebViewClient (yang kedua menimpa yang pertama)', () => {
 blok('jembatan JS hanya untuk host ZXRoom', () => {
   // addJavascriptInterface bisa dipanggil skrip mana pun yang termuat di
   // WebView — tanpa syarat host, situs pihak ketiga bisa memanggilnya.
+  //
+  // Dicari PEMANGGILANnya, bukan kemunculan kata: namanya juga muncul di
+  // komentar di atasnya, dan mencari kata biasa akan menemukan komentar itu
+  // lebih dulu — pemeriksaan jadi lulus/gagal karena alasan yang salah.
   const src = readFileSync(
     join(AKAR, 'app/src/main/java/com/zrooms/app/MainActivity.kt'), 'utf8')
-  const i = src.indexOf('addJavascriptInterface')
+  const i = src.indexOf('view.addJavascriptInterface(')
   assert.ok(i > -1, 'jembatan ZXR_APK tidak dipasang')
-  const sebelum = src.slice(Math.max(0, i - 400), i)
-  assert.match(sebelum, /if \(url\.startsWith\(BERANDA\)\)/,
+  assert.ok(src.lastIndexOf('if (url.startsWith(BERANDA))', i) > -1,
     'addJavascriptInterface dipasang tanpa batasan host')
 })
 
@@ -271,18 +303,27 @@ blok('satu sumber kebenaran: nilai tak disalin ulang di berkas lain', () => {
 const APK_RILIS = join(AKAR, 'app/build/outputs/apk/release/app-release.apk')
 
 if (existsSync(APK_RILIS)) {
-  const AKSIGNER = join(SDK, 'build-tools/35.0.0/apksigner.bat')
+  const AKSIGNER = SDK ? join(SDK, `build-tools/35.0.0/apksigner${extBat}`) : ''
+
+  /**
+   * Jalankan apksigner. Di Windows berkasnya .bat, yang tak bisa dipanggil
+   * execFileSync langsung (EINVAL) — jadi lewat cmd.exe. Di Linux/macOS
+   * berkasnya skrip yang bisa dijalankan langsung.
+   */
+  const jalankanApksigner = (target) => execFileSync(
+    process.platform === 'win32' ? 'cmd.exe' : AKSIGNER,
+    process.platform === 'win32'
+      ? ['/c', AKSIGNER, 'verify', '--print-certs', target]
+      : ['verify', '--print-certs', target],
+    { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
+  )
 
   blok('APK rilis ada', () => {
     assert.ok(statSync(APK_RILIS).size > 1_000_000, 'APK rilis mencurigakan kecil')
   })
 
   blok('APK rilis ditandatangani sertifikat Z-Rooms, bukan debug', () => {
-    // apksigner itu .bat — Node tak bisa execFileSync langsung (EINVAL),
-    // jadi lewat cmd.exe seperti apkanalyzer di atas.
-    const out = execFileSync('cmd.exe', ['/c', AKSIGNER, 'verify', '--print-certs', APK_RILIS], {
-      encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
-    })
+    const out = jalankanApksigner(APK_RILIS)
     assert.match(out, /certificate DN: CN=Z-Rooms/,
       'APK rilis masih memakai keystore debug — Android akan menolak menimpa versi resmi')
     assert.ok(!/CN=Android Debug/.test(out), 'APK rilis bertanda tangan debug')
@@ -298,9 +339,7 @@ if (existsSync(APK_RILIS)) {
     // APK dengan tanda tangan berbeda, jadi kalau keystore produksi hilang dan
     // build jatuh ke keystore debug, rilis baru TIDAK bisa menimpa yang lama —
     // dan itu baru ketahuan saat kasir memasangnya.
-    const keluaran = execFileSync('cmd.exe',
-      ['/c', AKSIGNER, 'verify', '--print-certs', APK_RILIS],
-      { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
+    const keluaran = jalankanApksigner(APK_RILIS)
     const sha = keluaran.match(/SHA-256 digest: ([0-9a-f]+)/i)
     assert.ok(sha, 'apksigner tak melaporkan SHA-256 sertifikat')
 
@@ -308,9 +347,7 @@ if (existsSync(APK_RILIS)) {
     const arsip = readdirSync(join(AKAR, 'rilis')).filter((f) => f.endsWith('.apk'))
     assert.ok(arsip.length > 0, 'tak ada APK arsip di rilis/ — tak ada patokan tanda tangan')
     const acuan = join(AKAR, 'rilis', arsip.sort().pop())
-    const keluaranAcuan = execFileSync('cmd.exe',
-      ['/c', AKSIGNER, 'verify', '--print-certs', acuan],
-      { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
+    const keluaranAcuan = jalankanApksigner(acuan)
     const shaAcuan = keluaranAcuan.match(/SHA-256 digest: ([0-9a-f]+)/i)
     assert.ok(shaAcuan, 'apksigner tak melaporkan SHA-256 APK arsip')
 

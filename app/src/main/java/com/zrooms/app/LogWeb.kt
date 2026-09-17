@@ -54,6 +54,7 @@ object LogWeb {
               });
             })();
             """.trimIndent(),
+            null,
         )
     }
 
