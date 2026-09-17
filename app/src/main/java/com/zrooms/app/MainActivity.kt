@@ -18,7 +18,9 @@ import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 
 /**
- * Z-Rooms versi Android: WebView tipis di atas https://zxroom.zomet.my.id.
+ * Z-Rooms versi Android: WebView tipis di atas situs produksi Z-Rooms.
+ * Alamatnya datang dari [BuildConfig.BERANDA], yang dibaca build.gradle.kts
+ * dari alamat.json — lihat catatan di `companion object` bawah.
  *
  * Sengaja TANPA Compose dan tanpa UI sendiri — seluruh tampilan datang dari
  * web. Yang ditambahkan di sini cuma yang browser tak bisa lakukan:
@@ -155,6 +157,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
-        const val BERANDA = "https://zxroom.zomet.my.id"
+        /**
+         * Alamat beranda. Datang dari build.gradle.kts, yang membacanya dari
+         * alamat.json di akar proyek — satu sumber kebenaran untuk alamat,
+         * id paket, dan versi. Jangan tulis ulang alamatnya di sini:
+         * scripts/check-android-apk.mjs akan menolak kalau nilainya beda.
+         */
+        const val BERANDA = BuildConfig.BERANDA
     }
 }

@@ -143,30 +143,54 @@ blok('cookie pihak-ketiga dinyalakan (syarat login NextAuth)', () => {
     'tanpa ini cookie __Host-authjs ditolak dan login tak nyangkut')
 })
 
-blok('alamat situs menunjuk host produksi Z-Rooms', () => {
-  const src = readFileSync(
-    join(AKAR, 'app/src/main/java/com/zrooms/app/MainActivity.kt'), 'utf8')
-  assert.match(src, /BERANDA = "https:\/\/zxroom\.zomet\.my\.id"/,
-    'alamat beranda salah atau bukan HTTPS')
+blok('alamat situs menunjuk host produksi Z-Rooms, dengan HTTPS', () => {
+  const janji = JSON.parse(readFileSync(join(AKAR, 'alamat.json'), 'utf8'))
+  assert.match(janji.beranda, /^https:\/\/zxroom\.zomet\.my\.id$/,
+    'alamat.json: "beranda" salah atau bukan HTTPS')
 })
 
-blok('satu sumber kebenaran: alamat.json vs MainActivity vs build.gradle.kts', () => {
-  // Tiga tempat menyebut alamat/versi. Kalau salah satu diubah dan yang lain
-  // tidak, aplikasi memuat situs lama tanpa gejala apa pun. Blok ini yang
-  // memperingatkan. Ubah alamat.json lebih dulu.
+blok('satu sumber kebenaran: nilai tak disalin ulang di berkas lain', () => {
+  // Alamat, id paket, dan versi hidup di alamat.json saja. build.gradle.kts
+  // membacanya, dan MainActivity mengambil alamat dari BuildConfig.
+  //
+  // Yang dijaga blok ini: kalau seseorang menyalin nilai itu kembali ke
+  // Kotlin atau menuliskannya langsung di Gradle, salinannya akan menyimpang
+  // diam-diam saat alamat.json berubah — aplikasi memuat situs lama tanpa
+  // gejala apa pun.
   const janji = JSON.parse(readFileSync(join(AKAR, 'alamat.json'), 'utf8'))
-  assert.ok(janji.beranda, 'alamat.json: kolom "beranda" hilang')
+  for (const k of ['beranda', 'idPaket', 'versiNama']) {
+    assert.ok(janji[k], `alamat.json: kolom "${k}" hilang`)
+  }
+  assert.equal(Number.isInteger(janji.versiKode), true,
+    'alamat.json: "versiKode" harus bilangan bulat')
 
   const kotlin = readFileSync(
     join(AKAR, 'app/src/main/java/com/zrooms/app/MainActivity.kt'), 'utf8')
-  assert.ok(kotlin.includes(`BERANDA = "${janji.beranda}"`),
-    `MainActivity.BERANDA tidak sama dengan alamat.json ("${janji.beranda}")`)
+  // Kotlin harus MEMBACA dari BuildConfig, bukan menyalin nilainya.
+  assert.ok(kotlin.includes('const val BERANDA = BuildConfig.BERANDA'),
+    'MainActivity.BERANDA harus memakai BuildConfig.BERANDA, bukan alamat yang ditulis ulang')
+  assert.ok(!kotlin.includes('zxroom.zomet.my.id'),
+    'MainActivity menyalin alamat dari alamat.json — hapus, pakai BuildConfig.BERANDA')
 
   const app = readFileSync(join(AKAR, 'app/build.gradle.kts'), 'utf8')
-  assert.ok(app.includes(`applicationId = "${janji.idPaket}"`),
-    `applicationId tidak sama dengan alamat.json ("${janji.idPaket}")`)
-  assert.ok(app.includes(`versionName = "${janji.versiNama}"`),
-    `versionName tidak sama dengan alamat.json ("${janji.versiNama}")`)
+  // `namespace` memang literal (itu identitas ruang nama, bukan nilai yang
+  // bisa berubah) — jadi yang diperiksa hanya blok defaultConfig.
+  const awal = app.indexOf('defaultConfig {')
+  const akhir = app.indexOf('buildFeatures {', awal)
+  const blokDefault = app.slice(awal, akhir > 0 ? akhir : undefined)
+  assert.ok(awal > 0, 'build.gradle.kts: blok defaultConfig tak ditemukan')
+
+  // Gradle harus MEMBACA dari alamat.json, bukan menuliskan nilainya.
+  for (const [kunci, nilai] of Object.entries({
+    idPaket: janji.idPaket, versiNama: janji.versiNama, versiKode: janji.versiKode,
+  })) {
+    assert.ok(!blokDefault.includes(`= "${nilai}"`) && !blokDefault.includes(`= ${nilai}\n`),
+      `build.gradle.kts menuliskan ${kunci} langsung — pakai bacaAlamat("${kunci}")`)
+    assert.ok(app.includes(`bacaAlamat("${kunci}")`),
+      `build.gradle.kts tidak membaca "${kunci}" dari alamat.json`)
+  }
+  assert.ok(app.includes('bacaAlamat("beranda")'),
+    'build.gradle.kts tidak menanam alamat dari alamat.json')
 
   // APK yang sudah dibangun harus memakai alamat yang sama juga.
   if (existsSync(APK)) {
@@ -175,6 +199,8 @@ blok('satu sumber kebenaran: alamat.json vs MainActivity vs build.gradle.kts', (
       'APK memakai applicationId lama — bangun ulang')
     assert.ok(badging.includes(`versionName='${janji.versiNama}'`),
       'APK memakai versionName lama — bangun ulang')
+    assert.ok(badging.includes(`versionCode='${janji.versiKode}'`),
+      'APK memakai versionCode lama — bangun ulang')
     // Alamat dicek lewat tabel untai DEX, tanpa skema: D8 memecah untai
     // panjang, jadi "https://" dan "zxroom.zomet.my.id" bisa terpisah.
     const tanpaSkema = janji.beranda.replace(/^https?:\/\//, '')

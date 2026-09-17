@@ -6,6 +6,21 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// Satu sumber kebenaran: alamat.json. Dibaca di sini dan oleh
+// scripts/check-android-apk.mjs, supaya alamat/versi tak bisa melenceng
+// antara JSON, Kotlin, dan build.gradle.kts.
+//
+// Dipotong sebagai teks, bukan lewat pustaka JSON: berkasnya kita sendiri
+// yang tulis dan bentuknya tetap.
+// ponytail: ganti ke pustaka JSON sungguhan kalau alamat.json jadi berkas
+// yang dikarang orang lain.
+fun bacaAlamat(kunci: String): String {
+    val teks = file("../alamat.json").readText()
+    val cocok = Regex("\"$kunci\"\\s*:\\s*\"?([^\",\\s}]+)\"?").find(teks)
+    return cocok?.groupValues?.get(1)
+        ?: error("alamat.json: kolom \"$kunci\" tidak ditemukan")
+}
+
 // Keystore produksi dibaca dari app/keystore.properties yang TIDAK masuk git.
 // Kalau berkasnya tidak ada (mis. mesin kontributor lain), jatuh ke keystore
 // debug supaya proyek tetap bisa dibangun — lihat blok buildTypes.
@@ -23,11 +38,22 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.zrooms.app"
+        applicationId = bacaAlamat("idPaket")
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        // Versi tinggal diubah di alamat.json, sekali, tanpa menyentuh berkas
+        // ini. Android menolak pasang APK dengan versionCode yang sama atau
+        // lebih kecil, dan pesannya membingungkan — inilah yang mencegahnya.
+        versionCode = bacaAlamat("versiKode").toInt()
+        versionName = bacaAlamat("versiNama")
+
+        // Alamat situs ditanam sebagai BuildConfig.BERANDA, supaya
+        // MainActivity tak perlu menyalinnya. Satu sumber: alamat.json.
+        buildConfigField("String", "BERANDA", "\"${bacaAlamat("beranda")}\"")
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     signingConfigs {
