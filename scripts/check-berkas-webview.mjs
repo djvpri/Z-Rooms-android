@@ -111,10 +111,24 @@ blok('manifes: kamera opsional, bukan izin wajib', () => {
     'Z-Rooms tak perlu izin CAMERA — aplikasi kamera meminta izinnya sendiri')
 })
 
-blok('versi dinaikkan untuk rilis ini', () => {
+blok('versi di alamat.json berbentuk benar', () => {
   const janji = JSON.parse(readFileSync(join(AKAR, 'alamat.json'), 'utf8'))
-  assert.equal(janji.versiNama, '1.0.2')
-  assert.equal(janji.versiKode, 3)
+  // Yang dijaga HUBUNGAN antar data, bukan angkanya. Mengunci "1.0.2"/3 bikin
+  // setiap rilis gagal di CI (workflow menaikkan versi SEBELUM memeriksa) dan
+  // tak menjaga apa pun — nilainya memang harus berubah tiap rilis.
+  assert.match(janji.versiNama, /^\d+\.\d+\.\d+$/,
+    'versiNama harus angka bertitik, mis. 1.0.3')
+  assert.ok(Number.isInteger(janji.versiKode) && janji.versiKode > 0,
+    'versiKode harus bilangan bulat positif — Android menuntutnya untuk update in-place')
+
+  // Kontrak yang benar-benar penting: versiKode harus DIBACA dari alamat.json,
+  // bukan ditulis ulang di Gradle. Kalau ditulis ulang, APK melaporkan versi
+  // lain daripada yang tertulis di berkas rilis dan update in-place ditolak.
+  const gradle = readFileSync(join(AKAR, 'app/build.gradle.kts'), 'utf8')
+  assert.match(gradle, /"VERSI_KODE",\s*bacaAlamat\("versiKode"\)/,
+    'VERSI_KODE harus dibaca dari alamat.json lewat bacaAlamat("versiKode")')
+  assert.match(gradle, /"VERSI_NAMA",[\s\S]{0,60}?bacaAlamat\("versiNama"\)/,
+    'VERSI_NAMA harus dibaca dari alamat.json, bukan ditulis ulang')
 })
 
 console.log(`\nOK — check-berkas-webview: ${n} blok lulus`)
