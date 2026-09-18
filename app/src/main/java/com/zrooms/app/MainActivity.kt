@@ -248,6 +248,11 @@ class MainActivity : AppCompatActivity() {
         } else {
             web.loadUrl(BERANDA)
         }
+
+        // Pembaruan diperiksa setelah beranda mulai dimuat, bukan sebelum:
+        // permintaan ke GitHub di jalur pembukaan aplikasi akan menambah
+        // waktu tunggu kasir. Pemeriksaannya sendiri berjalan di thread lain.
+        PemeriksaPembaruan.periksa(this, web)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

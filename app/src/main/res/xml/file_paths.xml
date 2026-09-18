@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Berkas APK hasil unduhan pembaruan, dibagikan ke pemasang paket Android
+     lewat FileProvider (lihat PemeriksaPembaruan.kt).
+
+     Hanya folder cache milik aplikasi yang dibuka, dan hanya satu subfolder di
+     dalamnya — bukan seluruh penyimpanan. FileProvider menolak berkas di luar
+     daftar ini, jadi membuka folder induk apa pun di sini berarti membuka
+     seluruh isinya juga. -->
+<paths>
+    <cache-path
+        name="pembaruan"
+        path="pembaruan/" />
+</paths>

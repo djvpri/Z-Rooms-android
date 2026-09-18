@@ -2,6 +2,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Pembaruan mandiri: APK versi baru diunduh lalu diserahkan ke pemasang
+         paket Android. Sejak Android 8 setiap aplikasi yang memasang APK
+         WAJIB punya izin ini, dan pengguna harus menyalakannya sendiri lewat
+         "Pasang aplikasi tak dikenal" — tak ada jalan memasang diam-diam. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <!-- Bon yang diunduh disimpan ke folder Unduhan; Android 10+ tak butuh
          izin tulis lagi, tapi perangkat lama (API 24-28) butuh. -->
     <uses-permission
@@ -41,6 +47,20 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Membagikan APK hasil unduhan ke pemasang paket Android. Sejak
+             Android 7 berkas tak boleh lagi diserahkan sebagai `file://` —
+             pemasang paket menolaknya dengan FileUriExposedException. Berkas
+             yang boleh dibuka dibatasi di res/xml/file_paths.xml. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.pembaruan"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 
 </manifest>

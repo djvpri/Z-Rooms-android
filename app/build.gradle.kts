@@ -50,6 +50,21 @@ android {
         // Alamat situs ditanam sebagai BuildConfig.BERANDA, supaya
         // MainActivity tak perlu menyalinnya. Satu sumber: alamat.json.
         buildConfigField("String", "BERANDA", "\"${bacaAlamat("beranda")}\"")
+
+        // Dipakai PemeriksaPembaruan untuk menanyakan rilis terakhir dan
+        // membandingkan versi yang sedang terpasang. Ditulis di sini, bukan di
+        // Kotlin, supaya tetap satu sumber dengan alamat & versi di atas.
+        buildConfigField("String", "REPO_RILIS", "\"${bacaAlamat("repoRilis")}\"")
+
+        // Pemasang paket Android MEMBANDINGKAN angka ini dari APK yang
+        // diserahkan dengan angka milik aplikasi yang terpasang. Kalau angka
+        // di APK tak lebih besar, pemasangan ditolak — jadi angka ini dipakai
+        // sebagai penjaga, dan harus datang dari sumber yang sama dengan
+        // versionCode di atas.
+        buildConfigField("int", "VERSI_KODE", bacaAlamat("versiKode"))
+
+        // Dipakai sebagai penanda versi pada User-Agent saat menanyakan rilis.
+        buildConfigField("String", "VERSI_NAMA", "\"${bacaAlamat("versiNama")}\"")
     }
 
     buildFeatures {
