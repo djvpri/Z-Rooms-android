@@ -115,22 +115,59 @@ blok('jembatan JS dibatasi host ZXRoom', () => {
     'dipasang tanpa batasan host — situs pihak ketiga bisa memanggilnya')
 })
 
-blok('jembatan JS sempit: metode terbatas & hanya menerima string', () => {
-  // Dua metode, keduanya sekadar MEMBERI TAHU. Batas jumlahnya yang dijaga,
-  // bukan angka duanya: jembatan ini dipanggil skrip mana pun yang termuat di
-  // WebView, jadi tiap metode baru memperbesar permukaan yang bisa dipanggil
-  // dari halaman. Menambah metode = sengaja, bukan tak sengaja.
-  const jml = (jembatan.match(/@JavascriptInterface/g) ?? []).length
-  assert.equal(jml, 2, `ada ${jml} metode jembatan, harus 2`)
-  // Argumen hanya boleh String — tipe lain berarti halaman bisa menyuruh APK
-  // melakukan sesuatu (buka URL, jalan perintah), bukan cuma melaporkan.
-  for (const m of jembatan.matchAll(/fun (\w+)\(([^)]*)\)/g)) {
-    assert.ok(/^\s*laporan: String\s*$/.test(m[2]) || m[2].trim() === '',
-      `metode jembatan "${m[1]}" menerima argumen selain String: (${m[2]})`)
+blok('jembatan JS sempit: tanpa jalur perintah & hanya menerima string', () => {
+  // SEBELUMNYA batas JUMLAH metode (2) yang dijaga. Angka itu tak lagi berarti
+  // begitu cetak ditambahkan, dan menjaga angka apa pun cepat usang: yang
+  // penting bukan berapa banyak, tapi APA yang boleh dilakukan.
+  //
+  // Yang dijaga sekarang:
+  //   1. tak ada metode yang MENGEMBALIKAN nilai yang bisa dibaca halaman
+  //      (kecuali daftar printer & versi, yang memang bukan data pribadi);
+  //   2. argumen hanya String — tipe lain berarti halaman bisa menyuruh APK
+  //      melakukan sesuatu, bukan cuma melaporkan;
+  //   3. setiap metode punya blok komentar tepat di atasnya, sehingga metode
+  //      baru tak bisa diselundupkan tanpa alasan tertulis.
+  const diizinkanKembalikan = ['daftarPrinter', 'printerTersimpan', 'versi']
+
+  const nama = [...jembatan.matchAll(/fun (\w+)\(/g)].map((m) => m[1])
+  assert.ok(nama.length >= 2, 'metode jembatan hilang')
+
+  // Diperiksa hanya metode yang BENAR-BENAR dipasang ke JavaScript. Metode
+  // internal kelas ini (`laporHasil`) tak bisa dipanggil halaman, jadi
+  // argumennya tak perlu dibatasi String.
+  const metodeJs = [...jembatan.matchAll(/@JavascriptInterface\s+fun (\w+)\(([^)]*)\)/g)]
+  assert.ok(metodeJs.length >= 2, 'metode @JavascriptInterface hilang')
+
+  for (const [, fungsi, argumen] of metodeJs) {
+    assert.ok(
+      argumen.trim() === '' || /^\s*[a-z]+: String\s*$/.test(argumen),
+      `metode jembatan "${fungsi}" menerima argumen selain String: (${argumen})`)
   }
-  // Tak ada nilai balik: halaman tak boleh bisa MEMBACA apa pun dari APK.
-  assert.ok(!/fun \w+\([^)]*\)\s*:\s*\w/.test(jembatan),
-    'metode jembatan mengembalikan nilai — halaman bisa membacanya')
+
+  // Pengembalian nilai: hanya yang ada di daftar putih, dan hanya untuk metode
+  // yang benar-benar terpasang ke JavaScript. Satu regex per metode supaya
+  // metode baru langsung ketahuan.
+  const kembalian = [...jembatan.matchAll(/@JavascriptInterface\s+fun (\w+)\([^)]*\)\s*:\s*([\w<>]+)/g)]
+  for (const [, fungsi, tipe] of kembalian) {
+    assert.ok(
+      diizinkanKembalikan.includes(fungsi),
+      `metode jembatan "${fungsi}" mengembalikan ${tipe} — halaman bisa membacanya`)
+  }
+
+  // Setiap @JavascriptInterface harus didahului komentar (/** ... */ dalam
+  // jarak dekat). Metode tanpa penjelasan = permukaan baru tanpa alasan.
+  for (const m of jembatan.matchAll(/@JavascriptInterface/g)) {
+    const sebelum = jembatan.slice(Math.max(0, m.index - 700), m.index)
+    assert.ok(sebelum.includes('/**'), 'ada metode jembatan tanpa komentar penjelasan di atasnya')
+  }
+
+  // Jalur cetak WAJIB membatasi panjang naskah: halaman yang salah (atau situs
+  // yang menyusup) tak boleh bisa mengirim teks raksasa yang menghabiskan memori.
+  // Dicek PEMAKAIANNYA, bukan sekadar namanya: `includes('MAKS_NASKAH')` tetap
+  // benar walau pemeriksaannya dilumpuhkan jadi `if (false)` — itu bug yang
+  // pernah lolos di sini.
+  assert.match(jembatan, /if \(naskah\.length > MAKS_NASKAH\)/,
+    'batas panjang naskah tidak benar-benar diperiksa')
 })
 
 blok('setiap langkah pemilih dicatat ke log', () => {
@@ -327,6 +364,109 @@ blok('versi di alamat.json berbentuk benar', () => {
     'VERSI_KODE harus dibaca dari alamat.json lewat bacaAlamat("versiKode")')
   assert.match(gradle, /"VERSI_NAMA",[\s\S]{0,60}?bacaAlamat\("versiNama"\)/,
     'VERSI_NAMA harus dibaca dari alamat.json, bukan ditulis ulang')
+})
+
+blok('cetak: izin Bluetooth & penguraian naskah ESC/POS', () => {
+  const printer = readFileSync(join(AKAR, 'app/src/main/java/com/zrooms/app/PrinterBluetooth.kt'), 'utf8')
+  const manifes = readFileSync(join(AKAR, 'app/src/main/AndroidManifest.xml'), 'utf8')
+
+  // Android 12 memecah izin Bluetooth jadi RUNTIME. Mendeklarasikan yang lama
+  // saja membuat tombol cetak melempar SecurityException di Android 12+ tanpa
+  // dialog izin pernah muncul — kasir melihat tombol yang mati.
+  assert.ok(manifes.includes('android.permission.BLUETOOTH_CONNECT'),
+    'BLUETOOTH_CONNECT tak dideklarasikan — cetak gagal di Android 12+')
+  assert.ok(manifes.includes('android.permission.BLUETOOTH_SCAN'),
+    'BLUETOOTH_SCAN tak dideklarasikan')
+  // Tanpa flag ini Android menuntut izin LOKASI untuk scan Bluetooth. Dicek
+  // pada BARIS izinnya (bukan sekadar nama flag di berkas mana pun): menghapus
+  // flag dari izinnya sementara kata itu masih ada di komentar tetap harus
+  // menggigit.
+  assert.match(manifes, /BLUETOOTH_SCAN"[\s\S]{0,200}?neverForLocation/,
+    'BLUETOOTH_SCAN tanpa neverForLocation — Android akan menuntut izin lokasi')
+  // Versi lama tetap butuh izin lamanya; maxSdkVersion membatasinya.
+  assert.match(manifes, /BLUETOOTH"\s*\n?\s*android:maxSdkVersion="30"/,
+    'BLUETOOTH lama tak dibatasi maxSdkVersion 30')
+  // Izin diminta saat mencetak, bukan saat aplikasi dibuka.
+  const main = readFileSync(join(AKAR, 'app/src/main/java/com/zrooms/app/MainActivity.kt'), 'utf8')
+  assert.match(main, /RequestMultiplePermissions/,
+    'izin Bluetooth tidak diminta lewat RequestMultiplePermissions')
+  assert.match(main, /naskahTertunda/,
+    'naskah tak disimpan saat izin diminta — kasir harus menekan cetak dua kali')
+
+  // Cetak WAJIB di thread lain: menyambung Bluetooth memblokir, dan di thread
+  // utama seluruh halaman web membeku.
+  assert.match(main, /Thread \{[\s\S]{0,400}?PrinterBluetooth\(applicationContext\)\.cetak\(/,
+    'cetak dijalankan di thread utama — halaman web akan membeku')
+
+  // UUID SPP adalah standar Bluetooth; salah ketik = tak ada printer yang cocok.
+  assert.ok(printer.includes('00001101-0000-1000-8000-00805F9B34FB'),
+    'UUID SPP salah atau hilang — tak ada printer yang bisa disambung')
+
+  // Cetak wajib menutup socket walau gagal, kalau tidak printer berikutnya
+  // tak bisa disambung sampai aplikasi ditutup.
+  assert.match(printer, /finally \{[\s\S]{0,200}?socket\?\.close\(\)/,
+    'socket tak ditutup di finally — sambungan berikutnya akan gagal')
+
+  // Printer hanya dicatat SETELAH berhasil.
+  const idxCetak = printer.indexOf('keluaran.flush()')
+  const idxSimpan = printer.indexOf('simpanPrinter(perangkat.address)')
+  assert.ok(idxCetak > -1 && idxSimpan > idxCetak,
+    'printer disimpan sebelum cetak berhasil — kegagalan akan tercatat sebagai berhasil')
+})
+
+blok('cetak: penguraian naskah benar (perintah vs teks)', () => {
+  const printer = readFileSync(join(AKAR, 'app/src/main/java/com/zrooms/app/PrinterBluetooth.kt'), 'utf8')
+
+  // Perintah dikirim sebagai byte, bukan teks: kalau perintah tercetak sebagai
+  // teks, nota penuh simbol aneh alih-alih terpotong.
+  assert.match(printer, /fun uraikanNaskah\(/, 'uraikanNaskah hilang')
+  assert.match(printer, /fun bacaPerintah\(/, 'bacaPerintah hilang')
+  // Teks harus ISO-8859-1: UTF-8 mengubah karakter beraksen jadi dua byte dan
+  // menggeser seluruh baris nota.
+  assert.ok(printer.includes('ISO_8859_1'),
+    'teks nota tak memakai ISO-8859-1 — baris akan bergeser')
+  // Kurung siku yang bukan perintah harus tetap jadi teks biasa.
+  assert.match(printer, /toIntOrNull\(\) \?: return null/,
+    'kurung siku non-angka dipaksa jadi perintah — isi nota bisa rusak')
+
+  // Hasil cetak dikembalikan ke halaman; tanpa itu kasir tak pernah tahu gagal.
+  const jembatan = readFileSync(join(AKAR, 'app/src/main/java/com/zrooms/app/JembatanApk.kt'), 'utf8')
+  assert.match(jembatan, /fun hasilCetakJs\(/, 'fungsi pelapor hasil cetak hilang')
+  // Pesan kesalahan memuat nama printer & tanda kutip — wajib di-escape.
+  assert.ok(jembatan.includes('JSONObject.quote'),
+    'pesan hasil cetak tak di-escape — skripnya rusak saat pesan memuat tanda kutip')
+})
+
+blok('cetak: uji naskah = salinan PERSIS logika produksi', () => {
+  // Uji di app/src/test/kotlin/UjiNaskah.kt memakai salinan `bacaPerintah` dan
+  // `uraikanNaskah`. Kalau salinan itu basi, ujinya lulus sambil menguji kode
+  // yang tak dipakai APK — dan bug lolos. Bandingkan pernyataan-pernyataan
+  // kuncinya (bukan seluruh berkas: komentar & tata letak boleh beda).
+  const prod = readFileSync(join(AKAR, 'app/src/main/java/com/zrooms/app/PrinterBluetooth.kt'), 'utf8')
+  const uji = readFileSync(join(AKAR, 'app/src/test/kotlin/UjiNaskah.kt'), 'utf8')
+
+  // Normalisasi: buang indentasi + `private`, supaya beda kosmetik tak dihitung.
+  const norm = (s) => s.split('\n').map((l) => l.trim().replace(/\bprivate /g, '')).join('\n')
+
+  const wajib = [
+    'if (t.length < 4 || !t.startsWith("<") || !t.endsWith(">")) return null',
+    'val isi = t.substring(1, t.length - 1)',
+    'if (isi.isEmpty()) return null',
+    'val bagian = isi.split(",")',
+    'val n = bagian[i].trim().toIntOrNull() ?: return null',
+    'if (n < 0 || n > 255) return null',
+    'keluaran.write(baris.toByteArray(Charsets.ISO_8859_1))',
+    'keluaran.write(0x0a)',
+  ]
+  const p = norm(prod)
+  const u = norm(uji)
+  for (const baris of wajib) {
+    assert.ok(p.includes(baris), `logika produksi kehilangan: ${baris}`)
+    // setara: buang spasi supaya perbedaan indentasi/kutip kecil tak mengganggu
+    const rapat = (s) => s.replace(/\s+/g, '')
+    assert.ok(rapat(u).includes(rapat(baris)),
+      `salinan di UjiNaskah.kt BASI untuk: ${baris}`)
+  }
 })
 
 console.log(`\nOK — check-berkas-webview: ${n} blok lulus`)

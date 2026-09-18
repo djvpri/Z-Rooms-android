@@ -6,17 +6,26 @@ import android.webkit.JavascriptInterface
 /**
  * Jembatan dari halaman web ke aplikasi.
  *
- * Permukaannya sengaja SEMPIT: dua metode, keduanya hanya MEMBERI TAHU, tanpa
- * nilai balik yang bisa dipakai halaman untuk membaca data aplikasi. Setiap
- * metode yang menerima teks dari halaman berarti teks itu dipercaya, dan
- * halaman web bisa dipengaruhi (gambar, tautan, iklan) — jadi dari sini tak ada
- * yang bisa memerintah aplikasi.
+ * Permukaannya sengaja SEMPIT: metode yang menerima teks dari halaman hanya
+ * menyimpannya atau mengirimkannya ke printer — tak ada yang bisa dipakai
+ * halaman untuk membaca data pribadi dari perangkat.
  *
  * Dipasang HANYA saat halaman yang dimuat berasal dari host ZXRoom sendiri —
  * lihat pemasangan di MainActivity. Tanpa syarat itu, situs pihak ketiga yang
  * terlanjur terbuka di WebView bisa memanggil jembatan ini.
  */
-class JembatanApk(private val konteks: Context) {
+class JembatanApk(
+    private val konteks: Context,
+    /**
+     * Dijalankan di thread utama dengan naskah nota.
+     *
+     * Cetak TIDAK dikerjakan di sini karena Bluetooth memblokir: menyambung
+     * butuh ratusan milidetik sampai beberapa detik, dan mengerjakannya di
+     * thread UI membuat halaman web membeku selama itu. MainActivity yang
+     * memindahkannya ke thread lain, lalu memanggil balik lewat JavaScript.
+     */
+    private val cetak: (naskah: String) -> Unit,
+) {
 
     /**
      * Dipanggil halaman setelah log berhasil terkirim, supaya simpanan log di
@@ -45,5 +54,72 @@ class JembatanApk(private val konteks: Context) {
     @JavascriptInterface
     fun simpanLaporan(laporan: String) {
         LogWeb.simpanLaporan(konteks, laporan)
+    }
+
+    /**
+     * Cetak naskah nota ke printer Bluetooth.
+     *
+     * TIDAK mengembalikan apa pun: hasilnya (berhasil/gagal) dilaporkan
+     * BELAKANGAN lewat `ZXR_CETAK_HASIL(...)` karena menyambung printer makan
+     * waktu — dan `@JavascriptInterface` yang menunggu akan membekukan halaman.
+     * Halaman harus menyiapkan `window.ZXR_CETAK_HASIL` sebelum memanggil ini.
+     *
+     * Panjang dibatasi supaya halaman yang salah (atau situs yang menyusup)
+     * tak mengirim teks raksasa yang menghabiskan memori.
+     */
+    @JavascriptInterface
+    fun cetak(naskah: String) {
+        if (naskah.length > MAKS_NASKAH) {
+            laporHasil(false, "Naskah nota terlalu panjang (${naskah.length} karakter).")
+            return
+        }
+        this.cetak(naskah)
+    }
+
+    /**
+     * Daftar printer yang sudah dipasangkan ke perangkat, dipisah baris baru.
+     *
+     * Sengaja mengembalikan daftar nama+alamat, bukan alamat saja: kasir
+     * memilih berdasarkan nama yang dikenali ("RPP02N"), bukan MAC.
+     */
+    @JavascriptInterface
+    fun daftarPrinter(): String {
+        val p = PrinterBluetooth(konteks)
+        if (!PrinterBluetooth.izinDiberikan(konteks)) return ""
+        return p.daftarPrinter().joinToString("\n")
+    }
+
+    /** Alamat printer terakhir yang berhasil dipakai, "" kalau belum ada. */
+    @JavascriptInterface
+    fun printerTersimpan(): String = PrinterBluetooth(konteks).printerTersimpan()
+
+    /**
+     * Kode versi APK. Dipakai halaman untuk memastikan APK-nya cukup baru:
+     * jembatan ini bisa dipanggil dari APK lama yang tak punya `cetak`, dan
+     * halaman perlu membedakan "belum ada" dari "ada tapi diam".
+     */
+    @JavascriptInterface
+    fun versi(): String = BuildConfig.VERSION_NAME
+
+    private fun laporHasil(ok: Boolean, pesan: String) {
+        MainActivity.jalankanJs(hasilCetakJs(ok, pesan))
+    }
+
+    companion object {
+        /** Batas panjang naskah. Nota thermal wajar < 4 KB. */
+        const val MAKS_NASKAH = 16_000
+
+        /**
+         * Panggil `window.ZXR_CETAK_HASIL(ok, pesan)` di halaman.
+         *
+         * Pesannya di-escape sebagai string JSON, bukan disisipkan apa adanya:
+         * pesan kesalahan memuat nama printer dan tanda kutip, dan menyisipkan
+         * mentah-mentah akan membuat skripnya rusak — tepat saat kasir butuh
+         * membaca penyebabnya.
+         */
+        fun hasilCetakJs(ok: Boolean, pesan: String): String {
+            val isi = org.json.JSONObject.quote(pesan)
+            return "if (window.ZXR_CETAK_HASIL) window.ZXR_CETAK_HASIL($ok, $isi);"
+        }
     }
 }

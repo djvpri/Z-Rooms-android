@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Pembaruan mandiri: APK versi baru diunduh lalu diserahkan ke pemasang
          paket Android. Sejak Android 8 setiap aplikasi yang memasang APK
@@ -19,6 +20,38 @@
          PemilihBerkas.mintaKamera), bukan saat aplikasi dibuka: kasir yang
          hanya memilih berkas dari galeri tak pernah melihat dialog izin. -->
     <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- Printer struk Bluetooth. Kasir mencetak bon ke printer thermal yang
+         dipasangkan ke tablet/HP kasir.
+
+         DUA izin karena aturannya berubah di Android 12 (API 31):
+           - API 31+ : BLUETOOTH_CONNECT (menyambung) + BLUETOOTH_SCAN
+                       (menemukan). Keduanya izin RUNTIME, jadi diminta saat
+                       kasir menekan tombol cetak — lihat PrinterBluetooth.
+           - API <=30: BLUETOOTH + BLUETOOTH_ADMIN, keduanya izin biasa yang
+                       cukup dideklarasikan. `maxSdkVersion` membatasinya supaya
+                       Android 12+ tak menampilkan izin usang ini di daftar.
+         Tanpa `neverForLocation` di BLUETOOTH_SCAN, Android menandai aplikasi
+         memakai Bluetooth untuk melacak lokasi — dan itu menuntut izin lokasi
+         yang sama sekali tak dipakai aplikasi ini. -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_ADMIN"
+        android:maxSdkVersion="30" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_CONNECT"
+        tools:targetApi="s" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="s" />
+    <!-- Bluetooth boleh tak ada; sisanya aplikasi tetap jalan (kasir masih bisa
+         memakai peramban di perangkat lain). -->
+    <uses-feature
+        android:name="android.hardware.bluetooth"
+        android:required="false" />
 
     <!-- Bon yang diunduh disimpan ke folder Unduhan; Android 10+ tak butuh
          izin tulis lagi, tapi perangkat lama (API 24-28) butuh. -->

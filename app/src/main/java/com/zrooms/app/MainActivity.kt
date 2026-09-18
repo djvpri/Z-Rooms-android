@@ -42,6 +42,30 @@ class MainActivity : AppCompatActivity() {
      */
     private lateinit var pemilih: PemilihBerkas
 
+    /**
+     * Naskah yang menunggu izin Bluetooth. Diisi saat kasir menekan cetak
+     * sebelum izin diberikan; dikosongkan setelah dipakai.
+     */
+    private var naskahTertunda: String? = null
+
+    /**
+     * Permintaan izin Bluetooth. `registerForActivityResult` WAJIB dipanggil
+     * tanpa syarat di onCreate — alasan yang sama dengan [PemilihBerkas].
+     */
+    private val mintaIzinBluetooth =
+        registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) { hasil ->
+            val naskah = naskahTertunda
+            naskahTertunda = null
+            if (naskah == null) return@registerForActivityResult
+            // Kalau ditolak, PrinterBluetooth yang menyusun pesannya — satu
+            // tempat, supaya kalimatnya sama dengan jalur izin-dicabut.
+            if (hasil.values.all { it }) {
+                kerjakanCetak(naskah)
+            } else {
+                laporCetak(false, "Izin Bluetooth ditolak. Cetak tak bisa jalan tanpa izin itu.")
+            }
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -56,6 +80,9 @@ class MainActivity : AppCompatActivity() {
         // Di sini, bukan di onCreate sebelum WebView: PemilihBerkas memanggil
         // LogWeb lewat lambda di bawah, dan lambda itu memegang `web`.
         LogWeb.pasangPenangkapCrash(applicationContext)
+
+        // Dipakai `jalankanJs` untuk memanggil balik halaman (hasil cetak).
+        webAktif = web
 
         pemilih = PemilihBerkas(this) { pesan -> LogWeb.catat(web, pesan) }
 
@@ -129,7 +156,10 @@ class MainActivity : AppCompatActivity() {
                 // mana pun yang termuat di WebView, jadi memasangnya untuk
                 // semua alamat akan membuka jalur dari situs pihak ketiga.
                 if (url.startsWith(BERANDA)) {
-                    view.addJavascriptInterface(JembatanApk(applicationContext), "ZXR_APK")
+                    view.addJavascriptInterface(
+                        JembatanApk(applicationContext) { naskah -> cetakStruk(naskah) },
+                        "ZXR_APK",
+                    )
                 }
                 // Kejadian selama pemuatan (saat halaman belum siap) dikirim
                 // menyusul, supaya tak hilang.
@@ -225,18 +255,53 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Tempat printer struk Bluetooth nanti.
+     * Cetak naskah nota ke printer Bluetooth, di thread latar.
      *
-     * Belum ada isinya — sengaja. Rencananya halaman web mengirim bon sebagai
-     * teks lewat jembatan JavaScript (`addJavascriptInterface`), lalu metode
-     * ini yang mengirimkannya ke printer. Dikosongkan supaya jelas bahwa
-     * jalur ini memang belum ada, bukan lupa.
+     * Bluetooth MEMBLOKIR: menyambung butuh ratusan milidetik sampai beberapa
+     * detik. Mengerjakannya di thread utama membekukan seluruh halaman web
+     * selama itu — kasir melihat aplikasi menggantung, bukan tombol yang
+     * bekerja. Karena itu seluruh urusannya dipindah ke thread lain.
+     *
+     * Izin Bluetooth diminta DI SINI, bukan saat aplikasi dibuka: kasir yang
+     * tak punya printer tak perlu pernah melihat dialog izinnya.
      */
-    @Suppress("unused")
-    private fun cetakStruk(teks: String) {
-        // TODO(printer): sambungkan ke BluetoothSocket printer thermal 58mm,
-        // tulis ESC/POS, lihat stack/ (belum dibuat).
-        throw NotImplementedError("Printer Bluetooth belum dipasang")
+    private fun cetakStruk(naskah: String) {
+        val izin = PrinterBluetooth.izinDibutuhkan()
+        val kurang = izin.filter {
+            checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+        if (kurang.isNotEmpty()) {
+            // Minta izin, lalu cetak yang tertunda setelah dijawab. Naskahnya
+            // disimpan: izin baru berlaku pada panggilan berikutnya, dan
+            // meminta kasir menekan tombol dua kali terasa seperti kerusakan.
+            naskahTertunda = naskah
+            LogWeb.catat(web, "izin Bluetooth diminta: ${kurang.joinToString(",")}")
+            mintaIzinBluetooth.launch(kurang.toTypedArray())
+            return
+        }
+        kerjakanCetak(naskah)
+    }
+
+    /** Kirim naskah ke printer di thread latar, lalu laporkan hasilnya ke halaman. */
+    private fun kerjakanCetak(naskah: String) {
+        Thread {
+            try {
+                PrinterBluetooth(applicationContext).cetak(naskah)
+                laporCetak(true, "Nota terkirim ke printer.")
+            } catch (e: PesanKesalahanPrinter) {
+                // Pesannya sudah disusun untuk kasir — diteruskan apa adanya.
+                laporCetak(false, e.message ?: "Cetak gagal.")
+            } catch (e: Exception) {
+                // Termasuk OutOfMemory / SecurityException yang lolos.
+                laporCetak(false, "Cetak gagal: ${e.message ?: e.javaClass.simpleName}")
+            }
+        }.start()
+    }
+
+    /** Panggil balik halaman dengan hasil cetak. Selalu di thread utama. */
+    private fun laporCetak(ok: Boolean, pesan: String) {
+        LogWeb.catat(web, "cetak ${if (ok) "berhasil" else "gagal"}: $pesan")
+        jalankanJs(JembatanApk.hasilCetakJs(ok, pesan))
     }
 
     override fun onDestroy() {
@@ -248,6 +313,10 @@ class MainActivity : AppCompatActivity() {
         // menunggu hasil saat aplikasi ditutup, ia menggantung selamanya —
         // dan itu terlihat sebagai "tombolnya rusak" pada pemakaian berikutnya.
         if (::pemilih.isInitialized) pemilih.lepas()
+        // Dikosongkan SEBELUM web.destroy(): setelah dibongkar, WebView tak
+        // boleh lagi dipanggil — dan `jalankanJs` bisa dipicu thread cetak
+        // yang masih berjalan saat kasir menutup aplikasi.
+        webAktif = null
         if (::web.isInitialized) web.destroy()
         super.onDestroy()
     }
@@ -260,5 +329,30 @@ class MainActivity : AppCompatActivity() {
          * scripts/check-android-apk.mjs akan menolak kalau nilainya beda.
          */
         const val BERANDA = BuildConfig.BERANDA
+
+        /**
+         * WebView yang sedang tampil, untuk memanggil JavaScript ke halaman.
+         *
+         * Disimpan statis supaya [JembatanApk] bisa memanggil balik tanpa
+         * memegang Activity — memegang Activity dari kelas yang hidup lebih
+         * lama adalah sumber kebocoran memori yang klasik. Referensinya
+         * dikosongkan di onDestroy.
+         */
+        @Volatile
+        private var webAktif: WebView? = null
+
+        /** Jalankan JavaScript di halaman, di thread utama. Aman kalau tak ada WebView. */
+        fun jalankanJs(skrip: String) {
+            val w = webAktif ?: return
+            w.post {
+                try {
+                    w.evaluateJavascript(skrip, null)
+                } catch (e: Exception) {
+                    // WebView yang sedang dibongkar bisa melempar; tak ada yang
+                    // bisa dilakukan, dan melempar dari sini hanya menambah
+                    // crash di atas masalah aslinya.
+                }
+            }
+        }
     }
 }
