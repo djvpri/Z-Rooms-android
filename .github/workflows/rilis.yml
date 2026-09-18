@@ -58,23 +58,37 @@ jobs:
       # android-actions/setup-android TIDAK dipakai: aksinya menganggap SDK
       # praterpasang runner "salah versi" lalu menjalankan `sdkmanager tools`,
       # paket yang sudah dihapus dari repo Google — aksinya gagal dgn exit 1
-      # dan seluruh rilis berhenti sebelum build. Runner ubuntu-latest sudah
-      # membawa SDK, sdkmanager, dan ANDROID_SDK_ROOT, jadi tak ada yg perlu
-      # dipasang; cukup paket di bawah ini.
+      # dan seluruh rilis berhenti sebelum build. Tapi aksinya juga menaruh
+      # cmdline-tools di PATH, dan itu yg tetap dibutuhkan: di runner ini
+      # `sdkmanager` TIDAK ada di PATH (exit 127 tanpa aksi itu). Jadi
+      # panggilannya dilakukan lewat jalur absolut, dicari dulu.
 
       # build-tools 35.0.0 dipatok oleh scripts/check-android-apk.mjs
-      # (aapt2 + apksigner). cmdline-tools;latest juga wajib: checker memanggil
-      # apkanalyzer dari cmdline-tools/latest/bin, sedangkan runner membawa
-      # salinannya di cmdline-tools/<versi> — path 'latest' tak ada tanpa ini.
-      # --sdk_root ditulis eksplisit supaya sdkmanager tak mengira dirinya di
-      # dalam paket cmdline-tools dan menolak memasang.
+      # (aapt2 + apksigner). cmdline-tools/latest juga wajib: checker memanggil
+      # apkanalyzer dari cmdline-tools/latest/bin, sedangkan runner menaruh
+      # salinannya di cmdline-tools/16.0 — jalur 'latest' tak ada tanpa ini.
       - name: Pasang build-tools 35.0.0 + platform + cmdline-tools/latest
         run: |
-          yes | sdkmanager --sdk_root="$ANDROID_SDK_ROOT" --licenses >/dev/null 2>&1 || true
-          sdkmanager --sdk_root="$ANDROID_SDK_ROOT" \
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          # cari sdkmanager: di PATH, lalu di tiap cmdline-tools/<versi>/bin.
+          SDKMAN=$(command -v sdkmanager || true)
+          if [ -z "$SDKMAN" ]; then
+            SDKMAN=$(find "$SDK_ROOT/cmdline-tools" -maxdepth 3 -name sdkmanager -type f 2>/dev/null | head -1)
+          fi
+          if [ -z "$SDKMAN" ]; then
+            echo "::error::sdkmanager tak ketemu di $SDK_ROOT/cmdline-tools"
+            ls -la "$SDK_ROOT" || true
+            exit 1
+          fi
+          echo "sdkmanager: $SDKMAN (SDK_ROOT=$SDK_ROOT)"
+          yes | "$SDKMAN" --sdk_root="$SDK_ROOT" --licenses >/dev/null 2>&1 || true
+          "$SDKMAN" --sdk_root="$SDK_ROOT" \
             --install "build-tools;35.0.0" "platforms;android-35" "cmdline-tools;latest"
-          ls -d "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" \
-            "$ANDROID_SDK_ROOT/build-tools/35.0.0"
+          # buktikan jalur yg dipatok checker benar-benar ada
+          ls -d "$SDK_ROOT/cmdline-tools/latest/bin" "$SDK_ROOT/build-tools/35.0.0"
+          # perlakukan repo sebagai aman; checkout berjalan sebagai user lain
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       # local.properties gitignored, tapi pemeriksa membacanya — jadi dibuat di sini.
       - name: Tulis local.properties
