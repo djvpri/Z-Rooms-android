@@ -3,6 +3,10 @@
 Dokumen ini menjawab satu pertanyaan: **bagaimana cara menerbitkan rilis APK
 baru**, dan apa yang harus dibaca lebih dulu.
 
+> **Agent yang menerima tugas merilis:** baca **`RILIS-AGENT.md`** lebih dulu.
+> Isinya prosedur langkah-demi-langkah khusus agent (perintah, kode HTTP,
+> verifikasi) dan mencakup Z1 Label juga. Dokumen ini latar belakangnya.
+
 Kalau kamu agent yang diminta merilis versi terbaru, baca sampai bagian
 "Jalur A" dan ikuti. Jangan mengarang langkah dari nol — seluruh rantai sudah
 diuji (42 pemeriksaan, lihat `scripts/verifikasi-rilis.sh`).
@@ -132,6 +136,60 @@ Release tanpa aset = update tak akan pernah terdeteksi pengguna.
 > Peringatan: APK yang ditandatangani keystore berbeda **tidak bisa** dipasang
 > menimpa yang terpasang. Android menolaknya dengan "app not installed". Pakai
 > keystore produksi yang sama, selalu.
+
+### Keystore TIDAK bisa dipulihkan dari Secrets — baca ini
+
+Kesalahpahaman yang mudah terjadi: "kan keystore ada di Secrets, jadi aman."
+**Tidak.** Sudah diuji langsung di repo ini — `GET /actions/secrets/KEYSTORE_B64`
+membalas **HTTP 200**, tapi isinya **hanya metadata**:
+
+```json
+{ "name": "KEYSTORE_B64",
+  "created_at": "2026-09-18T02:09:46Z",
+  "updated_at": "2026-09-18T02:09:46Z" }
+```
+
+Nol field nilai — bukan `value`, bukan `encrypted_value`. Jadi bukan "dilarang
+404", melainkan **nilainya memang tak pernah dikirim**. Kunci publik repo
+(`/actions/secrets/public-key`) hanya untuk **menulis** secret baru.
+
+> Kalau `zrooms-release.keystore` di laptop hilang, ia **hilang permanen**.
+> Secrets tidak bisa mengembalikannya.
+
+Akibatnya, dan ini berat:
+
+- semua HP yang sudah terpasang **tidak akan pernah bisa** update lagi
+- Android menolak APK bertanda-tangan berbeda saat memasang menimpa
+- pengguna harus menghapus + pasang ulang manual, dan kehilangan data lokal
+
+**Karena itu: simpan salinan base64 keystore + `keystore.properties` di tempat
+yang kamu kendalikan** — password manager, atau repo privat. Itu satu-satunya
+cadangan yang benar. Jangan pernah andalkan Secrets sebagai salinan tunggal.
+
+Cara memastikan keystore lokal masih yang benar sebelum rilis — bandingkan
+sertifikatnya dengan rilis terakhir:
+
+```bash
+export JAVA_HOME='C:\jdk\jdk-17.0.20+8'
+keytool -list -v -keystore zrooms-release.keystore -storepass <PASSWORD> \
+  | grep -i 'SHA256:'
+# harus sama dengan sertifikat rilis terakhir:
+#   a9426745a4529a9fbb3fa2f86cadcca3db2208c31707d8d9abcd5d1e89f9a48e
+```
+
+Atau lebih pasti, bandingkan APK-nya langsung:
+
+```bash
+"$BT/apksigner.bat" verify --print-certs "$(cygpath -w rilis/Z-Rooms-1.0.3.apk)" \
+  | grep -i 'SHA-256 digest'
+```
+
+Kalau berbeda, **jangan rilis**. Build-nya sia-sia: tak ada pengguna yang bisa
+memasangnya menimpa.
+
+**Mengganti secret di GitHub:** kalau punya salinan base64 baru, tulis ulang
+lewat API (nilai dienkripsi sealed-box dengan kunci publik repo dulu, lalu
+`PUT /actions/secrets/{name}`). Setelah itu workflow otomatis memakai yang baru.
 
 ---
 
