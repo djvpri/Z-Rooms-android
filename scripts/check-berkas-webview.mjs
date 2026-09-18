@@ -395,20 +395,46 @@ blok('cetak: izin Bluetooth & penguraian naskah ESC/POS', () => {
 
   // Cetak WAJIB di thread lain: menyambung Bluetooth memblokir, dan di thread
   // utama seluruh halaman web membeku.
-  assert.match(main, /Thread \{[\s\S]{0,400}?PrinterBluetooth\(applicationContext\)\.cetak\(/,
+  assert.match(main, /Thread \{[\s\S]{0,400}?PrinterBluetooth\.cetak\(/,
     'cetak dijalankan di thread utama — halaman web akan membeku')
 
   // UUID SPP adalah standar Bluetooth; salah ketik = tak ada printer yang cocok.
   assert.ok(printer.includes('00001101-0000-1000-8000-00805F9B34FB'),
     'UUID SPP salah atau hilang — tak ada printer yang bisa disambung')
 
-  // Cetak wajib menutup socket walau gagal, kalau tidak printer berikutnya
-  // tak bisa disambung sampai aplikasi ditutup.
-  assert.match(printer, /finally \{[\s\S]{0,200}?socket\?\.close\(\)/,
-    'socket tak ditutup di finally — sambungan berikutnya akan gagal')
+  // Socket disimpan, bukan dibuka-tutup per cetak (pola Z1 Label). Dua sifat
+  // yang wajib ada supaya itu aman:
+  //  (a) ada fungsi tutup yang benar-benar menutup socket, dan
+  //  (b) ada pemantau aliran masuk yang menutup saat printer putus — tanpa itu,
+  //      socket mati akan terus dianggap hidup dan cetakan berikutnya hilang.
+  assert.match(printer, /fun tutup\(\)[\s\S]{0,400}?socket\?\.close\(\)/,
+    'tak ada fungsi tutup() yang menutup socket')
+  assert.match(printer, /inputStream[\s\S]{0,300}?read\(/,
+    'tak ada pemantau aliran masuk — printer putus tak terdeteksi')
+
+  // Membatalkan penemuan sebelum menyambung: printer tak bisa disambung saat
+  // Bluetooth sedang memindai, dan kegagalannya muncul sebagai "tidak bisa
+  // tersambung" biasa — pesan yang menyesatkan kasir.
+  assert.match(printer, /cancelDiscovery\(\)/,
+    'penemuan Bluetooth tidak dibatalkan sebelum menyambung')
+
+  // Jalur SPP standar TIDAK cukup: sebagian printer struk murah tak
+  // mendaftarkan UUID SPP, dan tanpa cadangan refleksi alat itu dilaporkan
+  // rusak padahal bisa dipakai (pola dari aplikasi Z1 Label).
+  //
+  // Dicek sebagai NAMA METODE di dalam tanda kutip: pola lebar
+  // `createRfcommSocket` juga cocok dengan `createRfcommSocketToServiceRecord`,
+  // jadi menghapus cadangannya tak akan menggigit.
+  assert.match(printer, /getMethod\(\s*"createRfcommSocket"/,
+    'tak ada cadangan createRfcommSocket — printer tanpa UUID SPP akan gagal')
+
+  // Socket hidup selama aplikasi hidup, jadi konteksnya WAJIB dari aplikasi.
+  // Memakai Activity di sini membocorkan halaman yang sudah ditutup.
+  assert.match(main, /PrinterBluetooth\.pasang\(applicationContext\)/,
+    'PrinterBluetooth.pasang(applicationContext) tak dipanggil di onCreate')
 
   // Printer hanya dicatat SETELAH berhasil.
-  const idxCetak = printer.indexOf('keluaran.flush()')
+  const idxCetak = printer.indexOf('keluaranSekarang.flush()')
   const idxSimpan = printer.indexOf('simpanPrinter(perangkat.address)')
   assert.ok(idxCetak > -1 && idxSimpan > idxCetak,
     'printer disimpan sebelum cetak berhasil — kegagalan akan tercatat sebagai berhasil')

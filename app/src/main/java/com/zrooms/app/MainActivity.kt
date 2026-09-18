@@ -73,6 +73,11 @@ class MainActivity : AppCompatActivity() {
         web = findViewById(R.id.web)
         progres = findViewById(R.id.progres)
 
+        // Printer disiapkan dengan konteks aplikasi: socket-nya hidup selama
+        // aplikasi hidup, jadi ia tak boleh memegang Activity (itu membocorkan
+        // halaman yang sudah ditutup).
+        PrinterBluetooth.pasang(applicationContext)
+
         // Penangkap crash dipasang PALING AWAL: apa pun yang gagal setelah
         // baris ini terbaca di log yang dikirim kasir. Yang gagal SEBELUM
         // baris ini hanya terlihat di logcat Android.
@@ -286,7 +291,7 @@ class MainActivity : AppCompatActivity() {
     private fun kerjakanCetak(naskah: String) {
         Thread {
             try {
-                PrinterBluetooth(applicationContext).cetak(naskah)
+                PrinterBluetooth.cetak(naskah)
                 laporCetak(true, "Nota terkirim ke printer.")
             } catch (e: PesanKesalahanPrinter) {
                 // Pesannya sudah disusun untuk kasir — diteruskan apa adanya.

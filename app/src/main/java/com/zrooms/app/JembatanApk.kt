@@ -84,14 +84,13 @@ class JembatanApk(
      */
     @JavascriptInterface
     fun daftarPrinter(): String {
-        val p = PrinterBluetooth(konteks)
         if (!PrinterBluetooth.izinDiberikan(konteks)) return ""
-        return p.daftarPrinter().joinToString("\n")
+        return PrinterBluetooth.daftarPrinter().joinToString("\n")
     }
 
     /** Alamat printer terakhir yang berhasil dipakai, "" kalau belum ada. */
     @JavascriptInterface
-    fun printerTersimpan(): String = PrinterBluetooth(konteks).printerTersimpan()
+    fun printerTersimpan(): String = PrinterBluetooth.printerTersimpan()
 
     /**
      * Kode versi APK. Dipakai halaman untuk memastikan APK-nya cukup baru:
