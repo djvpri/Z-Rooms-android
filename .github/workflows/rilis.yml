@@ -1,0 +1,150 @@
+name: rilis
+
+# Rilis APK Z-Rooms dari GitHub, tanpa keystore di mesin pengerja.
+#
+# Kenapa ada: rilis lewat mesin yang punya keystore bikin keystore produksi
+# harus disalin ke tiap mesin, dan build tanpa keystore diam-diam jatuh ke
+# keystore DEBUG — APK-nya jadi, tapi Android menolak memasangnya menimpa
+# versi resmi di perangkat kasir. CI memegang keystore dari Secrets, jadi
+# siapa pun (manusia atau agen) bisa merilis tanpa memegang berkas rahasia.
+#
+# Yang dilakukan, berurutan:
+#   1. naikkan versi di alamat.json (versiNama + versiKode)
+#   2. tulis keystore + keystore.properties dari Secrets
+#   3. build rilis bertanda tangan
+#   4. jalankan pemeriksa (APK + berkas WebView)
+#   5. simpan APK ke rilis/, commit, tag, dan buat GitHub Release
+#
+# Dipicu manual: Actions -> rilis -> Run workflow. Isi versi (mis. 1.0.3).
+# versiKode dinaikkan otomatis (epoch detik), jadi tak pernah bentrok.
+
+on:
+  workflow_dispatch:
+    inputs:
+      versi:
+        description: 'Versi rilis (mis. 1.0.3) — tanpa awalan v'
+        required: true
+        type: string
+      catatan:
+        description: 'Catatan rilis (changelog)'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  rilis:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ambil kode
+        uses: actions/checkout@v4
+        with:
+          # commit balik (APK + versi) harus boleh mendorong ke main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pasang JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Pasang Android SDK
+        uses: android-actions/setup-android@v3
+
+      # build-tools 35.0.0 dipatok oleh scripts/check-android-apk.mjs
+      # (aapt2 + apksigner), dan apkanalyzer dipakai dari cmdline-tools.
+      - name: Pasang build-tools 35.0.0 + cmdline-tools
+        run: |
+          sdkmanager --install "build-tools;35.0.0" "platforms;android-35" "cmdline-tools;latest"
+
+      # local.properties gitignored, tapi pemeriksa membacanya — jadi dibuat di sini.
+      - name: Tulis local.properties
+        run: echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+
+      - name: Naikkan versi di alamat.json
+        env:
+          VERSI: ${{ inputs.versi }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const p = "alamat.json";
+            const j = JSON.parse(fs.readFileSync(p, "utf8"));
+            const versi = process.env.VERSI.replace(/^v/, "");
+            if (!/^\d+\.\d+\.\d+$/.test(versi)) {
+              console.error("versi harus angka bertitik, mis. 1.0.3 — dapat:", versi);
+              process.exit(1);
+            }
+            const lama = j.versiKode;
+            // versiKode naik satu dari yang ada di berkas, bukan epoch: angkanya
+            // tetap kecil dan terbaca manusia, dan Android hanya menuntut naik.
+            j.versiNama = versi;
+            j.versiKode = lama + 1;
+            fs.writeFileSync(p, JSON.stringify(j, null, 2) + "\n");
+            console.log(`versi ${versi}, versiKode ${lama} -> ${j.versiKode}`);
+          '
+          echo "VERSI=$VERSI" >> "$GITHUB_ENV"
+
+      # Keystore produksi dari Secrets — tak pernah menyentuh repo.
+      # Rahasia yang dibutuhkan (Settings -> Secrets and variables -> Actions):
+      #   KEYSTORE_B64            = base64 -w0 zrooms-release.keystore
+      #   KEYSTORE_PASSWORD       = storePassword
+      #   KEYSTORE_ALIAS          = keyAlias (mis. zrooms)
+      #   KEYSTORE_KEY_PASSWORD   = keyPassword
+      - name: Tulis keystore dari Secrets
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEYSTORE_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
+          KEYSTORE_KEY_PASSWORD: ${{ secrets.KEYSTORE_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::error::secret KEYSTORE_B64 kosong — tanpa itu APK jatuh ke keystore debug dan tak bisa dipasang menimpa versi resmi. Lihat catatan di dalam workflow."
+            exit 1
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > zrooms-release.keystore
+          # storeFile relatif terhadap app/, jadi ../zrooms-release.keystore.
+          # Ditulis lewat brace group, bukan heredoc ber-indentasi: heredoc
+          # dengan indentasi spasi menyisipkan spasi ke dalam nilainya dan
+          # Gradle gagal membacanya tanpa pesan yang jelas.
+          {
+            echo "storeFile=../zrooms-release.keystore"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=$KEYSTORE_ALIAS"
+            echo "keyPassword=$KEYSTORE_KEY_PASSWORD"
+          } > app/keystore.properties
+
+      - name: Build rilis bertanda tangan
+        run: ./gradlew clean assembleDebug assembleRelease --no-daemon
+
+      - name: Periksa APK (18 blok) + berkas WebView (15 blok)
+        run: |
+          node scripts/check-android-apk.mjs
+          node scripts/check-berkas-webview.mjs
+
+      # Menyimpan ke rilis/ sebelum Release dibuat: berkas inilah patokan
+      # tanda tangan untuk rilis berikutnya (check-android-apk.mjs membandingkan
+      # SHA-256 sertifikat terhadap APK terakhir di rilis/).
+      - name: Arsipkan APK ke rilis/
+        run: cp app/build/outputs/apk/release/app-release.apk "rilis/Z-Rooms-$VERSI.apk"
+
+      - name: Commit versi + APK
+        run: |
+          git config user.name "rilis-bot"
+          git config user.email "sentarummedia@gmail.com"
+          git add alamat.json "rilis/Z-Rooms-$VERSI.apk"
+          git commit -m "rilis: Z-Rooms $VERSI (versiKode $(node -p "require('./alamat.json').versiKode"))"
+          git push
+
+      - name: Buat tag + GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CATATAN: ${{ inputs.catatan }}
+        run: |
+          git tag -a "v$VERSI" -m "Z-Rooms $VERSI"
+          git push origin "v$VERSI"
+          gh release create "v$VERSI" \
+            "rilis/Z-Rooms-$VERSI.apk" \
+            --title "Z-Rooms $VERSI" \
+            --notes "${CATATAN:-Rilis Z-Rooms $VERSI.}"
