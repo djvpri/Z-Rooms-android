@@ -16,6 +16,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.ProgressBar
+import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
@@ -35,6 +36,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var web: WebView
     private lateinit var progres: ProgressBar
+    private lateinit var tvVersi: TextView
 
     /**
      * Permintaan `<input type="file">` dari web yang sedang menunggu.
@@ -57,6 +59,18 @@ class MainActivity : AppCompatActivity() {
 
         web = findViewById(R.id.web)
         progres = findViewById(R.id.progres)
+        tvVersi = findViewById(R.id.tvVersi)
+
+        // Memasang penangkap crash PALING AWAL: apa pun yang gagal setelah
+        // baris ini terbaca di log yang dikirim kasir. Kode yang gagal
+        // SEBELUM baris ini hanya terlihat di logcat Android.
+        LogWeb.pasangPenangkapCrash(applicationContext)
+
+        // Versi terpasang ditampilkan SEBELUM halaman web dimuat; kalau
+        // menunggu halaman, ia tak akan pernah muncul saat halaman gagal
+        // dimuat — justru saat paling dibutuhkan.
+        tvVersi.text = getString(R.string.label_versi, BuildConfig.VERSI_NAMA)
+        tvVersi.visibility = View.VISIBLE
 
         // Didaftarkan SEBELUM onCreate selesai: Activity Result API menolak
         // registrasi setelah activity berjalan.
@@ -132,6 +146,13 @@ class MainActivity : AppCompatActivity() {
             // terakhir menimpa yang pertama, dan navigasi tautan luar mati
             // tanpa pesan apa pun.
             override fun onPageFinished(view: WebView, url: String) {
+                // Halaman benar-benar tampil: penanda versi milik APK menyingkir
+                // supaya tak menutupi apa pun. Kalau halaman gagal dimuat,
+                // baris ini tak pernah jalan dan penandanya tetap terlihat.
+                // ponytail: andalkan callback ini, bukan kode status respons;
+                // kalau suatu saat banner tak mau hilang, pindahkan ke
+                // onReceivedHttpError/onReceivedError.
+                tvVersi.visibility = View.GONE
                 LogWeb.sambungkan(view)
                 // Jembatan supaya halaman bisa memberi tahu APK saat log sudah
                 // terkirim. Didaftarkan ulang tiap halaman selesai karena
@@ -147,6 +168,10 @@ class MainActivity : AppCompatActivity() {
                 // menyusul, supaya tak hilang.
                 val tertunda = LogWeb.isi()
                 if (tertunda.isNotEmpty()) LogWeb.catat(view, "log APK saat pemuatan:\n$tertunda")
+                // Versi APK yang menjalankan halaman ini. Ditulis di sini (bukan
+                // di onCreate) supaya ikut terkirim lewat tombol "Kirim log
+                // error": laporan web hanya tahu versi webnya.
+                LogWeb.catatVersi(view)
             }
         }
 
@@ -246,13 +271,17 @@ class MainActivity : AppCompatActivity() {
         if (savedInstanceState != null) {
             web.restoreState(savedInstanceState)
         } else {
-            web.loadUrl(BERANDA)
+            // Membuka /dashboard, bukan akar situs: akar cuma halaman depan
+            // yang mengalihkan ke dashboard setelah beberapa detik — kasir
+            // melihat halaman perantara lebih dulu, dan kalau halaman itu
+            // tak pernah selesai memuat, aplikasi mentok di sana.
+            web.loadUrl(BERANDA + "/dashboard")
         }
 
         // Pembaruan diperiksa setelah beranda mulai dimuat, bukan sebelum:
         // permintaan ke GitHub di jalur pembukaan aplikasi akan menambah
         // waktu tunggu kasir. Pemeriksaannya sendiri berjalan di thread lain.
-        PemeriksaPembaruan.periksa(this, web)
+        PemeriksaPembaruan.periksa(this)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -292,7 +321,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        web.destroy()
+        // Dijaga `isInitialized`: kalau onCreate gagal sebelum baris
+        // `web = findViewById(...)`, referensi ini belum terisi dan membacanya
+        // melempar UninitializedPropertyAccessException — aplikasi tak bisa
+        // ditutup rapi dan yang terlihat oleh kasir cuma "keluar sendiri".
+        if (::web.isInitialized) web.destroy()
         super.onDestroy()
     }
 

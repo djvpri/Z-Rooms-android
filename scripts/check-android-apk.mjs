@@ -6,6 +6,13 @@
 // seluruh berkas .kt diam-diam diabaikan. Build hijau, aplikasi kosong.
 // Baca DEX yang sebenarnya, bukan "BUILD SUCCESSFUL".
 //
+// Berkas WebView APK (MainActivity/LogWeb/JembatanApk/PemeriksaPembaruan) TIDAK
+// diperiksa dari sini: pemeriksa yang membaca teks sumber apa pun bentuknya
+// menilai BENTUK kode, bukan perilakunya — ia lulus saat implementasinya salah
+// dan gagal saat refactor yang benar mengubah formatnya. Berkas itu diuji lewat
+// perilaku di scripts/check-berkas-webview.mjs. Di sini hanya yang bisa
+// dibuktikan dari ARTEFAK: isi DEX, manifes terkompilasi, dan sertifikat.
+//
 // Jalankan: node scripts/check-android-apk.mjs
 
 import assert from 'node:assert/strict'

@@ -6,10 +6,11 @@ import android.webkit.JavascriptInterface
 /**
  * Jembatan dari halaman web ke aplikasi.
  *
- * Permukaannya sengaja SEMPIT: satu metode, tanpa argumen, tanpa nilai balik.
- * Setiap metode yang menerima teks dari halaman berarti teks itu dipercaya,
- * dan halaman web bisa dipengaruhi (gambar, tautan, iklan) — jadi yang bisa
- * dilakukan dari sini hanya memberi tahu, bukan memerintah.
+ * Permukaannya sengaja SEMPIT: dua metode, keduanya hanya MEMBERI TAHU, tanpa
+ * nilai balik yang bisa dipakai halaman untuk membaca data aplikasi. Setiap
+ * metode yang menerima teks dari halaman berarti teks itu dipercaya, dan
+ * halaman web bisa dipengaruhi (gambar, tautan, iklan) — jadi dari sini tak ada
+ * yang bisa memerintah aplikasi.
  *
  * Dipasang HANYA saat halaman yang dimuat berasal dari host ZXRoom sendiri —
  * lihat pemasangan di MainActivity. Tanpa syarat itu, situs pihak ketiga yang
@@ -27,6 +28,22 @@ class JembatanApk(private val konteks: Context) {
      */
     @JavascriptInterface
     fun kosongkan() {
-        LogWeb.kosongkan(konteks)
+        LogWeb.kosongkan()
+    }
+
+    /**
+     * Salinan laporan yang baru terkirim, disimpan di perangkat.
+     *
+     * Gunanya bukan arsip: kalau kasir menekan kirim lagi, isinya masih ada
+     * walau kiriman pertama gagal — dan laporan tak bisa dibuat ulang setelah
+     * kejadiannya lewat.
+     *
+     * Dibatasi panjangnya di [LogWeb] (laporan halaman sendiri sudah dipotong
+     * 200 kejadian). Teks dari halaman diperlakukan sebagai data, bukan
+     * perintah: yang dilakukan hanya menyimpannya.
+     */
+    @JavascriptInterface
+    fun simpanLaporan(laporan: String) {
+        LogWeb.simpanLaporan(konteks, laporan)
     }
 }

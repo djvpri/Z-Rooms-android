@@ -168,7 +168,7 @@ jobs:
       - name: Build rilis bertanda tangan
         run: ./gradlew clean assembleDebug assembleRelease --no-daemon
 
-      - name: Periksa APK (18 blok) + berkas WebView (15 blok)
+      - name: Periksa APK + berkas WebView
         run: |
           node scripts/check-android-apk.mjs
           node scripts/check-berkas-webview.mjs

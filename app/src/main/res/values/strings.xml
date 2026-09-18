@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="nama_app">Z-Rooms</string>
+    <!-- %1$s diisi BuildConfig.VERSI_NAMA. Nama versi tak dikunci di sini —
+         ia berubah tiap rilis dan sudah punya satu sumber: alamat.json. -->
+    <string name="label_versi">Z-Rooms v%1$s</string>
 </resources>

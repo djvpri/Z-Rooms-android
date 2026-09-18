@@ -51,48 +51,53 @@ object PemeriksaPembaruan {
     /**
      * Periksa rilis terakhir di latar belakang. Aman dipanggil kapan saja.
      *
+     * TIDAK menerima WebView: pemeriksaan ini berjalan di thread lain dan bisa
+     * selesai SETELAH jendela ditutup, dan saat itu WebView sudah dihancurkan —
+     * menyentuhnya dari thread lain membuat aplikasi jatuh. Hasilnya masuk ke
+     * [LogWeb] saja, yang tetap hidup dan sudah dibatasi jumlahnya.
+     *
      * Kegagalan apa pun (tak ada jaringan, GitHub membatasi permintaan,
      * rilisnya belum punya APK) sengaja hanya DICATAT, bukan ditampilkan:
      * ini fitur tambahan, dan mengganggu kasir dengan pesan pembaruan saat
      * sinyalnya buruk lebih merugikan daripada sekadar melewatinya.
      */
-    fun periksa(konteks: Context, web: android.webkit.WebView?) {
+    fun periksa(konteks: Context) {
         if (sedangJalan) return
         sedangJalan = true
         tukang.execute {
             try {
                 val rilis = tanyaRilisTerakhir()
                 if (rilis == null) {
-                    LogWeb.catat(web, "pembaruan: tak ada rilis terbit")
+                    LogWeb.catat(null, "pembaruan: tak ada rilis terbit")
                     return@execute
                 }
                 val (tag, urlApk) = rilis
                 val angkaBaru = angkaVersi(tag)
                 if (angkaBaru == null) {
-                    LogWeb.catat(web, "pembaruan: tag rilis \"$tag\" tak dikenali")
+                    LogWeb.catat(null, "pembaruan: tag rilis \"$tag\" tak dikenali")
                     return@execute
                 }
                 // Hanya versi yang LEBIH BARU. Versi sama atau lebih tua
                 // ditolak: pemasang paket akan menolaknya juga, dan lebih baik
                 // tak mengunduh 2,5 MB untuk sesuatu yang pasti gagal.
                 if (angkaBaru <= BuildConfig.VERSI_KODE) {
-                    LogWeb.catat(web, "pembaruan: versi terpasang ${BuildConfig.VERSI_KODE} " +
+                    LogWeb.catat(null, "pembaruan: versi terpasang ${BuildConfig.VERSI_KODE} " +
                         "sudah terbaru (terbit $angkaBaru)")
                     return@execute
                 }
                 if (urlApk == null) {
-                    LogWeb.catat(web, "pembaruan: rilis $tag tak melampirkan APK")
+                    LogWeb.catat(null, "pembaruan: rilis $tag tak melampirkan APK")
                     return@execute
                 }
 
-                LogWeb.catat(web, "pembaruan: versi $angkaBaru tersedia, mengunduh ${urlApk.substringAfterLast('/')}")
+                LogWeb.catat(null, "pembaruan: versi $angkaBaru tersedia, mengunduh ${urlApk.substringAfterLast('/')}")
                 val berkas = unduh(konteks, urlApk)
-                LogWeb.catat(web, "pembaruan: unduhan selesai ${berkas.length()} byte")
-                pasang(konteks, berkas, web)
+                LogWeb.catat(null, "pembaruan: unduhan selesai ${berkas.length()} byte")
+                pasang(konteks, berkas)
             } catch (e: Exception) {
                 // Termasuk IOException dan JSONException: apa pun bentuk
                 // kegagalannya, fitur ini tak boleh menjatuhkan aplikasi.
-                LogWeb.catat(web, "pembaruan GAGAL: ${e.javaClass.simpleName}: ${e.message}")
+                LogWeb.catat(null, "pembaruan GAGAL: ${e.javaClass.simpleName}: ${e.message}")
             } finally {
                 sedangJalan = false
             }
@@ -203,11 +208,11 @@ object PemeriksaPembaruan {
      *  2. Uri harus lewat FileProvider. Sejak Android 7 `file://` ditolak
      *     dengan FileUriExposedException.
      */
-    private fun pasang(konteks: Context, apk: File, web: android.webkit.WebView?) {
+    private fun pasang(konteks: Context, apk: File) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
             !konteks.packageManager.canRequestPackageInstalls()
         ) {
-            LogWeb.catat(web, "pembaruan: izin \"Pasang aplikasi tak dikenal\" belum aktif, membuka Pengaturan")
+            LogWeb.catat(null, "pembaruan: izin \"Pasang aplikasi tak dikenal\" belum aktif, membuka Pengaturan")
             konteks.startActivity(
                 Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                     Uri.parse("package:${konteks.packageName}"))
