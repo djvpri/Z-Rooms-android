@@ -16,7 +16,12 @@ name: rilis
 #   5. simpan APK ke rilis/, commit, tag, dan buat GitHub Release
 #
 # Dipicu manual: Actions -> rilis -> Run workflow. Isi versi (mis. 1.0.3).
-# versiKode dinaikkan otomatis (epoch detik), jadi tak pernah bentrok.
+# versiKode dinaikkan otomatis (versiKode sebelumnya + 1), jadi selalu naik.
+#
+# Rilis ini dibaca oleh APK yang sudah terpasang: PemeriksaPembaruan di
+# app/src/main/java/com/zrooms/app/ menanyakan /releases/latest dan menawarkan
+# pembaruan kalau angkanya lebih besar. Karena itu aset .apk WAJIB dilampirkan
+# di sini — tag saja tak cukup.
 
 on:
   workflow_dispatch:
