@@ -146,13 +146,10 @@ class MainActivity : AppCompatActivity() {
             // terakhir menimpa yang pertama, dan navigasi tautan luar mati
             // tanpa pesan apa pun.
             override fun onPageFinished(view: WebView, url: String) {
-                // Halaman benar-benar tampil: penanda versi milik APK menyingkir
-                // supaya tak menutupi apa pun. Kalau halaman gagal dimuat,
-                // baris ini tak pernah jalan dan penandanya tetap terlihat.
-                // ponytail: andalkan callback ini, bukan kode status respons;
-                // kalau suatu saat banner tak mau hilang, pindahkan ke
-                // onReceivedHttpError/onReceivedError.
-                tvVersi.visibility = View.GONE
+                // Penanda versi SENGAJA tidak disembunyikan di sini. Ia menetap
+                // di bawah layar selama aplikasi terbuka, supaya kasir bisa
+                // membacakan versinya kapan pun diminta — tanpa harus menutup
+                // dan membuka ulang aplikasi.
                 LogWeb.sambungkan(view)
                 // Jembatan supaya halaman bisa memberi tahu APK saat log sudah
                 // terkirim. Didaftarkan ulang tiap halaman selesai karena

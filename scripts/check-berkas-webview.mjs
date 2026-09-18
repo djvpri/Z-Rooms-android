@@ -134,19 +134,38 @@ blok('halaman awal /dashboard, bukan akar situs', () => {
     'posisi halaman hilang tiap putar layar')
 })
 
-blok('splash versi: diisi APK, disembunyikan saat halaman selesai', () => {
+blok('penanda versi: diisi APK, menetap selama aplikasi terbuka', () => {
   assert.match(main, /findViewById\(R\.id\.tvVersi\)/)
   // Diisi dari BuildConfig — satu sumber versi, bukan ditulis ulang di kode.
   assert.match(main, /tvVersi\.text\s*=\s*getString\(R\.string\.label_versi,\s*BuildConfig\.VERSI_NAMA\)/,
     'versi harus dari BuildConfig.VERSI_NAMA')
-  // Dinyalakan SEBELUM halaman dimuat, dimatikan di onPageFinished: saat
-  // halaman gagal dimuat, penandanya justru harus tetap terlihat.
+  // Dinyalakan SEBELUM halaman dimuat: kalau menunggu halaman, ia tak pernah
+  // muncul justru saat halaman gagal dimuat — saat paling dibutuhkan.
   const isi = main.indexOf('tvVersi.text = getString')
   const muat = main.indexOf('web.loadUrl(BERANDA + "/dashboard")')
   assert.ok(isi > 0 && muat > 0 && isi < muat,
     'versi harus ditulis sebelum halaman dimuat')
-  assert.match(main, /override fun onPageFinished[\s\S]{0,600}?tvVersi\.visibility\s*=\s*View\.GONE/,
-    'penanda versi tak pernah disembunyikan → menutupi halaman selamanya')
+  // Dinyatakan TAMPIL tepat setelah diisi: penandanya ber-atribut `gone` di
+  // layout, jadi tanpa baris ini ia tak pernah terlihat walau sudah diisi.
+  // Dijangkar langsung ke baris pengisian — `indexOf('tvVersi.text')` TIDAK
+  // cukup, karena `LogWeb.catatVersi(view)` di onPageFinished menambah
+  // kemunculan lain dan menutupi penyisipan yang salah tempat.
+  assert.match(main, /tvVersi\.text\s*=\s*getString\(R\.string\.label_versi, BuildConfig\.VERSI_NAMA\)[^\n]*\n[^\S\n]*tvVersi\.visibility\s*=\s*View\.VISIBLE/,
+    'versi harus dinyatakan tampil tepat setelah diisi → kalau tidak, penanda tetap tersembunyi')
+  // Disembunyikan saat halaman selesai? TIDAK. Penanda menetap supaya kasir
+  // bisa membacakan versinya kapan pun tanpa menutup-buka aplikasi. Dinyatakan
+  // sebagai pernyataan POSITIF, karena yang dijaga di sini justru tidak adanya
+  // baris — `!grep` tanpa uji positif adalah hijau palsu.
+  // 1-5 baris komentar, lalu `LogWeb.sambungkan(view)` — TANPA sisipan kode di
+  // antaranya, tepat satu baris per baris. Dihitung per BARIS (flag m), bukan
+  // per karakter: `[\s\S]{0,N}` selalu bisa melahap baris GONE yang disisipkan,
+  // sehingga uji itu hijau walau penandanya sudah kembali disembunyikan.
+  // Kelas `[^\S\n]` (bukan `\s`) sengaja: berkas proyek ini CRLF, dan `\s`
+  // ikut menelan `\r` sehingga `$` tak lagi menempel di ujung baris.
+  assert.match(main, /^[^\S\n]*\/\/ Penanda versi SENGAJA tidak disembunyikan[^\n]*\n([^\S\n]*\/\/[^\n]*\n){1,5}[^\S\n]*LogWeb\.sambungkan\(view\)$/m,
+    'penanda versi kembali disembunyikan → kasir tak bisa membaca versi kapan pun')
+  assert.ok(!/tvVersi\.visibility\s*=\s*View\.GONE/.test(main),
+    'tvVersi di-GONE-kan → penanda versi tak lagi menetap')
 })
 
 blok('penanda versi ada di layout dengan id yang dicari kode', () => {
