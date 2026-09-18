@@ -19,23 +19,4 @@
         android:max="100"
         android:visibility="gone" />
 
-    <!-- Penanda versi APK yang sedang terpasang. Dipasang DI ATAS halaman web
-         oleh APK, bukan oleh situs: yang perlu diketahui kasir saat melaporkan
-         masalah adalah versi APLIKASI, dan itu hanya diketahui sisi sini.
-         Warnanya sama dengan bilah status supaya terbaca sebagai milik aplikasi,
-         bukan bagian halaman. Menghilang begitu halaman web selesai dimuat —
-         kalau halaman gagal dimuat, penandanya tetap terlihat dan itu memang
-         yang diinginkan. -->
-    <TextView
-        android:id="@+id/tvVersi"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom"
-        android:background="#0F766E"
-        android:paddingHorizontal="12dp"
-        android:paddingVertical="3dp"
-        android:textColor="#FFFFFF"
-        android:textSize="11sp"
-        android:visibility="gone" />
-
 </FrameLayout>

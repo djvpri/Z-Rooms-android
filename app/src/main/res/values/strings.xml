@@ -2,6 +2,10 @@
 <resources>
     <string name="nama_app">Z-Rooms</string>
     <!-- %1$s diisi BuildConfig.VERSI_NAMA. Nama versi tak dikunci di sini —
-         ia berubah tiap rilis dan sudah punya satu sumber: alamat.json. -->
+         ia berubah tiap rilis dan sudah punya satu sumber: alamat.json.
+
+         Dipakai sebagai JUDUL bilah judul (tempat Android memang menyediakan
+         keterangan aplikasi), bukan banner di atas halaman web: banner menutupi
+         dashboard, dan itu dikeluhkan kasir. -->
     <string name="label_versi">Z-Rooms v%1$s</string>
 </resources>

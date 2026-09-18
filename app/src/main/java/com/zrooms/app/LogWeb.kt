@@ -55,6 +55,18 @@ object LogWeb {
 
     private val baris = ArrayDeque<String>()
     private const val KUNCI = "zxroom.log.apk"
+    private const val PREFS = "zxroom"
+
+    /**
+     * Konteks aplikasi, diisi [pasangPenangkapCrash].
+     *
+     * Dipakai supaya [catat] bisa menulis ke disk tanpa harus diberi Context
+     * oleh tiap pemanggil — pemanggilnya ada di MainActivity, PemilihBerkas,
+     * PemeriksaPembaruan, dan penangkap crash, dan tak satu pun punya alasan
+     * untuk peduli ke mana lognya disimpan.
+     */
+    @Volatile
+    private var konteks: Context? = null
 
     /** Pesan terakhir & berapa kali berturut-turut — dasar peringkasan. */
     private var terakhir: String? = null
@@ -73,16 +85,16 @@ object LogWeb {
      * bukan diam.
      */
     fun pasangPenangkapCrash(konteks: Context) {
+        this.konteks = konteks.applicationContext
         val bawaan = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { utas, galat ->
             try {
                 catat(null, "APLIKASI BERHENTI MENDADAK (utas ${utas.name}): " + jejak(galat))
-                // Disimpan ke disk SEBELUM keluar. commit(), bukan apply():
-                // apply() menulis di latar belakang, dan proses ini sedang
-                // berakhir — tulisannya bisa tak pernah selesai. Jejak crash
-                // yang hilang bersamaan dengan matinya proses justru jejak yang
-                // paling dibutuhkan.
-                konteks.getSharedPreferences("zxroom", Context.MODE_PRIVATE)
+                // Tulis paksa SEBELUM keluar. [catat] sudah menulis ke disk
+                // tiap kali, tapi di sini `commit()` dipakai lagi karena
+                // jalur ini berjalan tepat sebelum proses mati: apa pun yang
+                // tertunda tak akan pernah selesai.
+                konteks.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                     .edit().putString(KUNCI, isi()).commit()
             } catch (_: Throwable) {
                 // Penangkap tak boleh menjatuhkan aplikasi: biarkan handler
@@ -159,8 +171,10 @@ object LogWeb {
                     baris.removeLast()
                     baris.addLast("[ulangan] pesan yang sama diulang $ulangan kali total")
                 }
-                while (baris.size > MAKS) baris.removeFirst()
-                while (baris.size > MAKS) baris.removeFirst()
+                // Baris ringkasan ini juga ikut ke disk: isinya ("… diulang
+                // N kali total") berubah tiap kali hitungannya naik, dan itu
+                // satu-satunya jejak yang membedakan "sekali" dari "200 kali".
+                simpanKeDisk()
                 return
             }
         } else {
@@ -172,6 +186,7 @@ object LogWeb {
             .format(java.util.Date())
         baris.addLast("[$t] ${dipotong(pesan)}")
         while (baris.size > MAKS) baris.removeFirst()
+        simpanKeDisk()
 
         web?.post {
             // Dikirim lewat event supaya JS yang menerjemahkannya ke console.error,
@@ -186,6 +201,40 @@ object LogWeb {
     }
 
     /**
+     * Tulis isi log ke disk.
+     *
+     * ## Kenapa tiap kejadian, bukan cuma saat crash
+     *
+     * Dulu `baris` cuma hidup di memori proses; yang bertahan di disk hanya
+     * tulisan di penangkap crash. Akibatnya persis seperti yang dilaporkan
+     * kasir: tombol "Kirim log error" melaporkan **0 kejadian**.
+     *
+     * Sebabnya: yang menjatuhkan aplikasi bukan selalu crash. Android boleh
+     * MEMBUNUH proses yang sedang di latar belakang — kamera terbuka, memori
+     * sesak, kasir pindah aplikasi. Proses yang dibunuh begitu tak menjalankan
+     * penangkap crash apa pun, jadi seluruh isi memori hilang tanpa jejak, dan
+     * kejadian yang justru menjelaskan masalahnya (pembaruan APK, versi
+     * terpasang, kamera gagal, izin ditolak) ikut lenyap.
+     *
+     * `apply()`, bukan `commit()`: tulisannya di latar belakang, dan `baris`
+     * cuma sampai [MAKS] baris sehingga satu tulisan kecil — menahan UI kasir
+     * untuk tiap baris log justru merugikan. Jalur yang berjalan tepat sebelum
+     * proses mati tetap memakai `commit()` di [pasangPenangkapCrash].
+     *
+     * Dipanggil dengan `@Synchronized` dari [catat] dan [kosongkan] saja.
+     */
+    private fun simpanKeDisk() {
+        val k = konteks ?: return
+        try {
+            k.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit().putString(KUNCI, isi()).apply()
+        } catch (_: Throwable) {
+            // Menyimpan log tak boleh menjatuhkan aplikasi — kegagalan di sini
+            // cuma berarti log sisi APK hilang, bukan aplikasi rusak.
+        }
+    }
+
+    /**
      * Simpan laporan utuh dari halaman web ke perangkat.
      *
      * Dipanggil halaman lewat jembatan `ZXR_APK.simpanLaporan` SETELAH kiriman
@@ -194,13 +243,13 @@ object LogWeb {
      * ulang setelah kejadiannya lewat.
      */
     fun simpanLaporan(konteks: Context, laporan: String) {
-        konteks.getSharedPreferences("zxroom", Context.MODE_PRIVATE)
+        konteks.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putString(KUNCI, laporan.take(MAKS_LAPORAN)).apply()
     }
 
     /** Laporan terakhir yang tersimpan di perangkat, atau kosong. */
     fun laporanTersimpan(konteks: Context): String =
-        konteks.getSharedPreferences("zxroom", Context.MODE_PRIVATE)
+        konteks.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(KUNCI, "") ?: ""
 
     /** Isi log dari sisi aplikasi, untuk ditampilkan kalau halaman belum siap. */
@@ -218,6 +267,10 @@ object LogWeb {
         baris.clear()
         terakhir = null
         ulangan = 0
+        // Disk ikut dikosongkan. Kalau tidak, isi lama tetap terbaca setelah
+        // kiriman sukses, dan kiriman berikutnya mengulang kejadian yang sudah
+        // terkirim — persis yang mau dihindari oleh fungsi ini.
+        simpanKeDisk()
     }
 
     /**

@@ -1,32 +1,52 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <uses-permission android:name="android.permission.INTERNET" />
     <!-- Pembaruan mandiri: APK versi baru diunduh lalu diserahkan ke pemasang
          paket Android. Sejak Android 8 setiap aplikasi yang memasang APK
          WAJIB punya izin ini, dan pengguna harus menyalakannya sendiri lewat
          "Pasang aplikasi tak dikenal" — tak ada jalan memasang diam-diam. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Kamera. Kasir memotret KTP langsung dari halaman booking, dan APK ini
+         MEMANGGIL aplikasi kamera lewat ACTION_IMAGE_CAPTURE.
+
+         Dokumen Android menuntut izin ini untuk ACTION_IMAGE_CAPTURE: tanpa
+         izin yang sudah diberikan, panggilan itu melempar SecurityException —
+         dan pada Android 15 lemparan itu menjatuhkan PROSES, bukan cuma
+         memunculkan pesan. Itulah "aplikasi keluar sendiri saat klik kamera".
+
+         Diminta saat kasir benar-benar menekan tombol Kamera (lihat
+         PemilihBerkas.mintaKamera), bukan saat aplikasi dibuka: kasir yang
+         hanya memilih berkas dari galeri tak pernah melihat dialog izin. -->
+    <uses-permission android:name="android.permission.CAMERA" />
 
     <!-- Bon yang diunduh disimpan ke folder Unduhan; Android 10+ tak butuh
          izin tulis lagi, tapi perangkat lama (API 24-28) butuh. -->
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
-    <!-- Foto KTP penyewa di halaman booking diambil dari kamera. Ini izin
-         "kamera ada di perangkat", BUKAN izin memakai kamera: aplikasi kamera
-         yang dipanggil lewat ACTION_IMAGE_CAPTURE meminta izinnya sendiri, jadi
-         Z-Rooms tak perlu CAMERA dan tak ada dialog izin tambahan saat memotret.
-
-         Tanpa baris ini, Play Store menyembunyikan aplikasi dari perangkat
-         tanpa kamera belakang; dengan baris ini, perangkat tanpa kamera tetap
-         bisa memasang dan tombol "Pilih file" tetap jalan. -->
+    <!-- Ini "kamera ADA di perangkat", bukan izin memakainya — izinnya di
+         atas. Perangkat tanpa kamera belakang tetap boleh memasang aplikasi,
+         dan tombol "Pilih file" tetap jalan: memilih berkas tak butuh kamera
+         sama sekali. Tidak ada fitur kamera di aplikasi ini selain memotret KTP. -->
     <uses-feature
         android:name="android.hardware.camera"
         android:required="false" />
     <uses-feature
         android:name="android.hardware.camera.autofocus"
         android:required="false" />
+
+    <!-- Sejak Android 11 (API 30) APLIKASI LAIN tak terlihat tanpa deklarasi
+         ini. PemilihBerkas menanyakan `resolveActivity` untuk memastikan ada
+         aplikasi kamera sebelum membukanya; tanpa <queries>, jawabannya selalu
+         "tidak ada" walau kameranya jelas ada, dan tombol Kamera jadi mati.
+         Izin CAMERA di atas TIDAK menggantikan deklarasi ini: keduanya
+         mengurus hal berbeda. -->
+    <queries>
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
+    </queries>
 
     <application
         android:allowBackup="false"
@@ -60,6 +80,18 @@
             <meta-data
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
+        </provider>
+        <!-- Foto KTP diserahkan ke aplikasi kamera lewat `content://` dari
+             authority ini. Terpisah dari `.pembaruan` di atas karena
+             file_paths-nya beda: yang ini cache/ktp-foto, yang itu Unduhan. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.berkas"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths_ktp" />
         </provider>
     </application>
 

@@ -185,24 +185,30 @@ blok('pemilih berkas & kamera dipasang (tombol booking tak boleh diam)', () => {
   // pemilih berkas sendiri — tanpa onShowFileChooser, <input type="file">
   // diabaikan diam-diam.
   //
-  // Diperiksa dari KODE SUMBER, bukan DEX: nama metode bisa dipangkas R8, dan
+  // Diperiksa dari KODE SUMBER, bukan DEX: nama metode bisa dipangkis R8, dan
   // yang penting perilakunya ada di sumber yang dibangun.
+  //
+  // Sebagian besar urusan pemilih berkas pindah ke PemilihBerkas.kt; keduanya
+  // dibaca, karena titik masuknya tetap di MainActivity.
   const src = readFileSync(
     join(AKAR, 'app/src/main/java/com/zrooms/app/MainActivity.kt'), 'utf8')
+  const pilihSrc = readFileSync(
+    join(AKAR, 'app/src/main/java/com/zrooms/app/PemilihBerkas.kt'), 'utf8')
+  const manifes = readFileSync(join(AKAR, 'app/src/main/AndroidManifest.xml'), 'utf8')
 
   assert.match(src, /override fun onShowFileChooser\(/,
     'onShowFileChooser tidak ada — <input type="file"> akan diam total')
-  assert.match(src, /FileChooserParams\.parseResult\(/,
+  assert.match(pilihSrc, /FileChooserParams\.parseResult\(/,
     'hasil pemilih tak diteruskan balik ke WebView')
   // Callback WAJIB dipanggil, termasuk saat dibatalkan. Kalau tidak, halaman
   // web menunggu selamanya dan tombolnya tampak rusak padahal cuma dibatalkan.
-  assert.match(src, /registerForActivityResult\(/,
+  assert.match(pilihSrc, /registerForActivityResult\(/,
     'Activity Result API tidak dipakai untuk menerima hasil pemilih')
   // ACTION_IMAGE_CAPTURE untuk capture="environment" (tombol "Kamera"),
   // ACTION_GET_CONTENT dari createIntent() untuk "Pilih file".
-  assert.match(src, /ACTION_IMAGE_CAPTURE/,
+  assert.match(pilihSrc, /ACTION_IMAGE_CAPTURE/,
     'tombol "Kamera" tidak memakai ACTION_IMAGE_CAPTURE')
-  assert.match(src, /params\.createIntent\(\)/,
+  assert.match(pilihSrc, /params\.createIntent\(\)/,
     'tombol "Pilih file" tidak memakai createIntent() (accept-types hilang)')
 
   // isCaptureEnabled baru ada di API 30 sementara minSdk 24 — tanpa penjaga
@@ -211,8 +217,15 @@ blok('pemilih berkas & kamera dipasang (tombol booking tak boleh diam)', () => {
   // Pencocokan literal, bukan regex: nama konstanta ini panjang dan bertitik,
   // dan pola regex untuknya gampang salah tanpa terlihat.
   assert.ok(
-    src.includes('Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && params.isCaptureEnabled'),
+    pilihSrc.includes('VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R &&'),
     'isCaptureEnabled dipanggil tanpa penjaga versi → crash di Android 7-10')
+  // Izin CAMERA WAJIB diminta saat runtime sebelum kamera dibuka; tanpa itu
+  // ACTION_IMAGE_CAPTURE melempar SecurityException dan prosesnya jatuh —
+  // inilah "aplikasi keluar sendiri saat klik kamera".
+  assert.match(pilihSrc, /mintaIzin\.launch\(android\.Manifest\.permission\.CAMERA\)/,
+    'izin kamera tak pernah diminta → SecurityException saat tombol Kamera ditekan')
+  assert.ok(manifes.includes('android.permission.CAMERA'),
+    'izin CAMERA tak ada di manifes → SecurityException saat kamera dibuka')
 })
 
 blok('hanya satu WebViewClient (yang kedua menimpa yang pertama)', () => {

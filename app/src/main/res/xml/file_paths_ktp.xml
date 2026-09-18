@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Foto KTP yang akan ditulis oleh aplikasi kamera.
+
+     Hanya SATU berkas di dalam cache milik aplikasi yang dibuka, bukan folder
+     induk dan bukan seluruh penyimpanan: FileProvider menolak berkas di luar
+     daftar ini, jadi membuka folder induk di sini berarti membuka semua isinya
+     sekalian. Dipakai lewat authority `${applicationId}.berkas` di manifes. -->
+<paths>
+    <cache-path
+        name="ktp-foto"
+        path="ktp-foto/" />
+</paths>

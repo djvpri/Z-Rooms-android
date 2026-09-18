@@ -16,10 +16,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.ProgressBar
-import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
-import androidx.activity.result.ActivityResultLauncher
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 
 /**
@@ -36,22 +33,14 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var web: WebView
     private lateinit var progres: ProgressBar
-    private lateinit var tvVersi: TextView
 
     /**
-     * Permintaan `<input type="file">` dari web yang sedang menunggu.
-     *
-     * WebView menyerahkan seluruh pemilihan berkas ke aplikasi lewat
-     * `onShowFileChooser`, dan callback [ValueCallback] itu WAJIB dipanggil
-     * balik — kalau tidak, halaman web menunggu selamanya dan tombolnya
-     * tampak "tidak merespon", tanpa pesan apa pun. Dipakai juga sebagai
-     * penanda bahwa pemilih berkas sedang terbuka, supaya halaman web tidak
-     * memicu dua pemilih sekaligus.
+     * Tombol "Kamera" & "Pilih file". Dipisah ke [PemilihBerkas]:
+     * `registerForActivityResult` untuk hasil kamera wajib dipanggil tanpa
+     * syarat di onCreate, dan aturan itu lebih mudah dijaga kalau seluruh
+     * urusannya ada di satu kelas.
      */
-    private var mintaBerkas: ValueCallback<Array<Uri>>? = null
-
-    /** Pemilih berkas & kamera. Hasilnya diteruskan balik ke WebView. */
-    private lateinit var pilihBerkas: ActivityResultLauncher<Intent>
+    private lateinit var pemilih: PemilihBerkas
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -59,37 +48,22 @@ class MainActivity : AppCompatActivity() {
 
         web = findViewById(R.id.web)
         progres = findViewById(R.id.progres)
-        tvVersi = findViewById(R.id.tvVersi)
 
-        // Memasang penangkap crash PALING AWAL: apa pun yang gagal setelah
-        // baris ini terbaca di log yang dikirim kasir. Kode yang gagal
-        // SEBELUM baris ini hanya terlihat di logcat Android.
+        // Penangkap crash dipasang PALING AWAL: apa pun yang gagal setelah
+        // baris ini terbaca di log yang dikirim kasir. Yang gagal SEBELUM
+        // baris ini hanya terlihat di logcat Android.
+        //
+        // Di sini, bukan di onCreate sebelum WebView: PemilihBerkas memanggil
+        // LogWeb lewat lambda di bawah, dan lambda itu memegang `web`.
         LogWeb.pasangPenangkapCrash(applicationContext)
 
-        // Versi terpasang ditampilkan SEBELUM halaman web dimuat; kalau
-        // menunggu halaman, ia tak akan pernah muncul saat halaman gagal
-        // dimuat — justru saat paling dibutuhkan.
-        tvVersi.text = getString(R.string.label_versi, BuildConfig.VERSI_NAMA)
-        tvVersi.visibility = View.VISIBLE
+        pemilih = PemilihBerkas(this) { pesan -> LogWeb.catat(web, pesan) }
 
-        // Didaftarkan SEBELUM onCreate selesai: Activity Result API menolak
-        // registrasi setelah activity berjalan.
-        //
-        // Hasilnya SELALU diteruskan balik, termasuk saat kasir membatalkan
-        // (data null). Callback yang tak dipanggil membuat halaman web menunggu
-        // selamanya, dan tombolnya tampak rusak padahal cuma dibatalkan.
-        pilihBerkas = registerForActivityResult(
-            ActivityResultContracts.StartActivityForResult()
-        ) { hasil ->
-            val cb = mintaBerkas ?: return@registerForActivityResult
-            mintaBerkas = null
-            val uris = WebChromeClient.FileChooserParams.parseResult(hasil.resultCode, hasil.data)
-            LogWeb.catat(web, if (uris == null || uris.isEmpty())
-                "pemilih selesai: DIBATALKAN / tak ada berkas (kode=${hasil.resultCode})"
-            else
-                "pemilih selesai: ${uris.size} berkas")
-            cb.onReceiveValue(uris)
-        }
+        // Bilah judul memuat nama aplikasi + VERSI. Sebelumnya versi menempel
+        // sebagai banner di bawah layar dan menutupi dashboard — sekarang ia
+        // duduk di tempat yang memang disediakan Android untuk keterangan
+        // aplikasi, dan halaman web tak berkurang sedikit pun.
+        supportActionBar?.title = getString(R.string.label_versi, BuildConfig.VERSI_NAMA)
 
         // WebView TIDAK memakai CookieManager bawaan secara otomatis untuk
         // autentikasi; harus dinyalakan sendiri. Situs memakai cookie
@@ -146,10 +120,6 @@ class MainActivity : AppCompatActivity() {
             // terakhir menimpa yang pertama, dan navigasi tautan luar mati
             // tanpa pesan apa pun.
             override fun onPageFinished(view: WebView, url: String) {
-                // Penanda versi SENGAJA tidak disembunyikan di sini. Ia menetap
-                // di bawah layar selama aplikasi terbuka, supaya kasir bisa
-                // membacakan versinya kapan pun diminta — tanpa harus menutup
-                // dan membuka ulang aplikasi.
                 LogWeb.sambungkan(view)
                 // Jembatan supaya halaman bisa memberi tahu APK saat log sudah
                 // terkirim. Didaftarkan ulang tiap halaman selesai karena
@@ -163,6 +133,10 @@ class MainActivity : AppCompatActivity() {
                 }
                 // Kejadian selama pemuatan (saat halaman belum siap) dikirim
                 // menyusul, supaya tak hilang.
+                //
+                // `catat` di sini memang menyalin isi yang sudah tercatat: yang
+                // dituju sisi WEB, karena pengirim laporan ada di halaman web.
+                // Sisi APK menyimpan isinya sendiri di dalam LogWeb.
                 val tertunda = LogWeb.isi()
                 if (tertunda.isNotEmpty()) LogWeb.catat(view, "log APK saat pemuatan:\n$tertunda")
                 // Versi APK yang menjalankan halaman ini. Ditulis di sini (bukan
@@ -186,68 +160,16 @@ class MainActivity : AppCompatActivity() {
              *
              * WebView TIDAK punya UI pemilih berkas sendiri — tanpa override ini,
              * menekan `<input type="file">` tidak melakukan apa-apa sama sekali,
-             * tanpa pesan error. Itulah bug yang dilaporkan kasir.
-             *
-             * Dua masukan dibedakan sesuai permintaan web: `capture` = "Kamera"
-             * memakai ACTION_IMAGE_CAPTURE (buka aplikasi kamera langsung),
-             * sisanya ACTION_GET_CONTENT (pemilih berkas/galeri).
+             * tanpa pesan error. Seluruh urusannya ada di [PemilihBerkas]; di
+             * sini cuma penyambungnya, karena `onShowFileChooser` hidup di
+             * WebChromeClient (WebView tak punya UI pemilih berkas sendiri).
              */
             override fun onShowFileChooser(
                 view: WebView,
                 callback: ValueCallback<Array<Uri>>,
                 params: FileChooserParams,
             ): Boolean {
-                // LogWeb mencatat SETIAP langkah: tanpa itu, keluhan "tombol tak
-                // merespon" tak bisa dibedakan antara pemilih tak terbuka,
-                // kasir membatalkan, atau berkas dikembalikan tapi web diam.
-                LogWeb.catat(web, "pilih berkas diminta: mode=${params.mode} " +
-                    "capture=${params.acceptTypes.joinToString(",").take(60)}")
-
-                // Pemilih sebelumnya belum selesai: balas yang lama dengan null
-                // supaya halaman web tak menggantung, lalu layani yang baru.
-                mintaBerkas?.onReceiveValue(null)
-                mintaBerkas = callback
-
-                val banyak = params.mode == FileChooserParams.MODE_OPEN_MULTIPLE
-                val intent = try {
-                    // createIntent() sudah menyusun ACTION_GET_CONTENT lengkap
-                    // dengan accept-types dari atribut `accept` web. Lebih benar
-                    // daripada menyusun intent sendiri dan lupa MIME-nya.
-                    params.createIntent()
-                } catch (e: Exception) {
-                    // Perangkat tanpa aplikasi pemilih berkas (jarang, tapi ada
-                    // di HP kasir yang dipangkas pabrik).
-                    LogWeb.catat(web, "createIntent GAGAL: ${e.javaClass.simpleName}: ${e.message}")
-                    mintaBerkas = null
-                    callback.onReceiveValue(null)
-                    return false
-                }
-
-                if (banyak) intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
-
-                // `capture="environment"` dari web: pakai kamera langsung.
-                // createIntent() mengabaikannya, jadi diganti di sini.
-                //
-                // isCaptureEnabled baru ada di API 30; minSdk aplikasi ini 24,
-                // jadi dijaga versi — memanggilnya langsung akan crash di
-                // Android 7-10, dan itu justru HP kasir yang umum dipakai.
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && params.isCaptureEnabled) {
-                    intent.action = android.provider.MediaStore.ACTION_IMAGE_CAPTURE
-                    LogWeb.catat(web, "memakai kamera langsung (ACTION_IMAGE_CAPTURE)")
-                }
-
-                return try {
-                    pilihBerkas.launch(intent)
-                    LogWeb.catat(web, "pemilih dibuka: ${intent.action}")
-                    true
-                } catch (e: Exception) {
-                    // Tak ada aplikasi yang bisa menangani: beri tahu web supaya
-                    // tombolnya tak diam-diam menggantung.
-                    LogWeb.catat(web, "LAUNCH GAGAL: ${e.javaClass.simpleName}: ${e.message}")
-                    mintaBerkas = null
-                    callback.onReceiveValue(null)
-                    false
-                }
+                return pemilih.mintaBerkas(callback, params)
             }
         }
 
@@ -322,6 +244,10 @@ class MainActivity : AppCompatActivity() {
         // `web = findViewById(...)`, referensi ini belum terisi dan membacanya
         // melempar UninitializedPropertyAccessException — aplikasi tak bisa
         // ditutup rapi dan yang terlihat oleh kasir cuma "keluar sendiri".
+        // Callback pemilih berkas dibalas null DULUAN: kalau halaman web
+        // menunggu hasil saat aplikasi ditutup, ia menggantung selamanya —
+        // dan itu terlihat sebagai "tombolnya rusak" pada pemakaian berikutnya.
+        if (::pemilih.isInitialized) pemilih.lepas()
         if (::web.isInitialized) web.destroy()
         super.onDestroy()
     }

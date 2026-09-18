@@ -1,9 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Induk AppCompat: MainActivity mewarisi AppCompatActivity supaya
-         komponen lama (ProgressBar) seragam di semua versi Android. -->
-    <style name="Theme.ZRooms" parent="Theme.AppCompat.DayNight.NoActionBar">
+         komponen lama (ProgressBar) seragam di semua versi Android.
+
+         BUKAN NoActionBar: bilah judul dipakai untuk menampilkan VERSI
+         aplikasi (lihat MainActivity.onCreate). Dulu versi menempel sebagai
+         banner di bawah layar dan menutupi dashboard — dikeluhkan kasir. -->
+    <style name="Theme.ZRooms" parent="Theme.AppCompat.DayNight.DarkActionBar">
         <item name="android:statusBarColor">#0F766E</item>
+        <item name="colorPrimary">#0F766E</item>
+        <item name="colorPrimaryDark">#0F766E</item>
         <item name="android:windowBackground">#FFFFFF</item>
     </style>
 </resources>

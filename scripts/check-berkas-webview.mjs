@@ -22,6 +22,8 @@ const jembatan = readFileSync(
   join(AKAR, 'app/src/main/java/com/zrooms/app/JembatanApk.kt'), 'utf8')
 const logweb = readFileSync(
   join(AKAR, 'app/src/main/java/com/zrooms/app/LogWeb.kt'), 'utf8')
+const berkas = readFileSync(
+  join(AKAR, 'app/src/main/java/com/zrooms/app/PemilihBerkas.kt'), 'utf8')
 const manifest = readFileSync(join(AKAR, 'app/src/main/AndroidManifest.xml'), 'utf8')
 
 let n = 0
@@ -34,29 +36,65 @@ blok('onShowFileChooser dipasang', () =>
     'tanpa ini <input type="file"> diam total — bug yang dilaporkan kasir'))
 
 blok('hasil pemilih diteruskan balik ke WebView', () => {
-  assert.match(main, /FileChooserParams\.parseResult\(/)
-  // Harus ada jalur yang memanggil callback, termasuk saat dibatalkan.
-  assert.match(main, /cb\.onReceiveValue\(uris\)/)
-  assert.match(main, /mintaBerkas\?\.onReceiveValue\(null\)/,
-    'callback lama tak dibalas → halaman web menggantung')
+  // Seluruh urusan pemilih berkas pindah ke PemilihBerkas: registrasi hasil
+  // HARUS tanpa syarat di onCreate, dan kamera menerima berkas lewat URI.
+  // Diperiksa di berkas itu, bukan di MainActivity.
+  assert.match(berkas, /FileChooserParams\.parseResult\(/)
+  assert.match(berkas, /cb\?\.onReceiveValue\(uris\)/)
+  // Setiap jalur gagal WAJIB membalas null. Callback yang tak pernah dibalas
+  // membuat halaman web menggantung selamanya — tombol yang diam, tanpa
+  // pesan. Ini yang dulu terjadi.
+  // Dihitung, bukan sekadar dicari: `onReceiveValue(null)` muncul di DUA jalur
+  // (pemilih dibatalkan, dan pemilih gagal). Saat satu jalur kehilangan
+  // pembalasannya, pencarian biasa tetap hijau — dan tombolnya diam lagi.
+  const batal = (berkas.match(/cb\?\.onReceiveValue\(null\)/g) ?? []).length
+  assert.ok(batal >= 2,
+    `hanya ${batal} jalur yang membalas null — jalur batal ATAU gagal tak dibalas → halaman web menggantung`)
 })
 
-blok('Activity Result API dipakai', () =>
-  assert.match(main, /registerForActivityResult\(/))
+blok('hasil kamera didaftarkan TANPA syarat di onCreate', () => {
+  // Android boleh membunuh proses saat aplikasi kamera terbuka. Callback yang
+  // didaftarkan bersyarat tak ada saat pemulihan, dan yang kasir lihat:
+  // aplikasi keluar sendiri. Karena itu registrasinya harus di properti
+  // kelas — dijalankan saat objek dibangun — bukan di dalam if/else.
+  // Registrasi harus di PROPERI KELAS, bukan di dalam fungsi. Diperiksa lewat
+  // jarak: baris `private val pilih ... =` harus langsung diikuti baris
+  // `activity.registerForActivityResult(`. Pencocokan pola `...() )` saja tak
+  // menangkapnya — pola itu tetap cocok walau bloknya dipindah ke dalam cabang.
+  const iVal = berkas.indexOf('private val pilih: ActivityResultLauncher')
+  assert.ok(iVal > -1, 'launcher pemilih tak ada sebagai properti kelas')
+  const ekor = berkas.slice(iVal).split(/\r?\n/)
+  assert.ok(/^\s*activity\.registerForActivityResult\($/.test(ekor[1] ?? ''),
+    'registrasi hasil pemilih tak lagi langsung di properti kelas → tak ada saat proses dipulihkan → aplikasi keluar sendiri')
+  // Dua launcher: satu untuk pemilih/kamera, satu untuk izin. Yang kedua
+  // wajib, karena ACTION_IMAGE_CAPTURE tanpa izin CAMERA melempar
+  // SecurityException yang menjatuhkan proses.
+  assert.match(berkas, /private val mintaIzin = activity\.registerForActivityResult\(/,
+    'launcher izin tak ada sebagai properti kelas')
+  assert.match(berkas, /mintaIzin\.launch\(android\.Manifest\.permission\.CAMERA\)/,
+    'izin kamera tak pernah diminta → SecurityException saat kamera dibuka')
+})
 
-blok('tombol Kamera pakai ACTION_IMAGE_CAPTURE', () =>
-  assert.match(main, /ACTION_IMAGE_CAPTURE/))
-
-blok('tombol Pilih file pakai createIntent() (accept-types ikut)', () =>
-  assert.match(main, /params\.createIntent\(\)/))
-
+blok('foto kamera ditulis ke content:// milik sendiri', () => {
+  // Akar "keluar sendiri saat klik kamera": tanpa EXTRA_OUTPUT aplikasi
+  // kamera mengembalikan foto lewat extras, dan sejak Android 11 extras dari
+  // aplikasi lain tak bisa dibaca. Pemanggilnya melempar SecurityException.
+  assert.match(berkas, /MediaStore\.EXTRA_OUTPUT/,
+    'EXTRA_OUTPUT hilang → foto dikirim lewat extras yang tak terbaca di Android 11+')
+  assert.match(berkas, /FileProvider\.getUriForFile\(/,
+    'URI file:// ditolak sejak Android 7 (FileUriExposedException) — wajib FileProvider')
+  assert.match(berkas, /FLAG_GRANT_WRITE_URI_PERMISSION/,
+    'tanpa FLAG_GRANT_WRITE_URI_PERMISSION aplikasi kamera tak boleh menulis fotonya')
+  assert.match(berkas, /resolveActivity\(/,
+    'tanpa resolveActivity, ketiadaan kamera muncul sebagai crash, bukan pesan')
+})
 blok('isCaptureEnabled dijaga versi (minSdk 24, API-nya 30)', () => {
   // Pencocokan literal, bukan regex: `Build.VERSION.CODES.R` ditulis apa
   // adanya, dan regex pada rangkaian titik-titik seperti ini gampang salah
   // tanpa terlihat (sudah kejadian: pola yang tampak benar menolak teks yang
   // persis sama).
   assert.ok(
-    main.includes('Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && params.isCaptureEnabled'),
+    berkas.includes('VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R &&'),
     'dipanggil tanpa penjaga versi → crash di Android 7-10')
 })
 
@@ -96,8 +134,11 @@ blok('jembatan JS sempit: metode terbatas & hanya menerima string', () => {
 })
 
 blok('setiap langkah pemilih dicatat ke log', () => {
+  // Penanda ini yang membuat laporan kasir bisa dibaca: tanpa "pemilih dibuka"
+  // tak kelihatan apakah pemilihnya sempat terbuka, dan tanpa "DIBATALKAN"
+  // penutupan kamera terlihat sama dengan tombol yang tak merespon.
   for (const tanda of ['pilih berkas diminta', 'pemilih dibuka', 'LAUNCH GAGAL', 'DIBATALKAN']) {
-    assert.ok(main.includes(tanda), `log kehilangan penanda "${tanda}"`)
+    assert.ok(berkas.includes(tanda), `log kehilangan penanda "${tanda}"`)
   }
 })
 
@@ -113,14 +154,33 @@ blok('halaman bisa memberi tahu APK saat log terkirim', () => {
   assert.match(logweb, /ZXR_APK/)
 })
 
-blok('manifes: kamera opsional, bukan izin wajib', () => {
+blok('manifes: izin CAMERA ADA, dan kamera tetap opsional di perangkat', () => {
   assert.match(manifest, /android\.hardware\.camera"[^>]*\n?[^>]*required="false"/,
     'tanpa uses-feature required=false, perangkat tanpa kamera tak bisa memasang')
   assert.match(manifest, /hardware\.camera\.autofocus/)
-  // Aplikasi memanggil aplikasi KAMERA lain; ia sendiri tak perlu izin CAMERA,
-  // dan memintanya justru memunculkan dialog izin yang tak perlu.
-  assert.ok(!/android\.permission\.CAMERA/.test(manifest),
-    'Z-Rooms tak perlu izin CAMERA — aplikasi kamera meminta izinnya sendiri')
+  // DIBALIK dari pemeriksaan sebelumnya. Dulu di sini tertulis "tak perlu izin
+  // CAMERA" — dan itu yang membuat aplikasi keluar sendiri saat tombol Kamera
+  // ditekan: ACTION_IMAGE_CAPTURE tanpa izin CAMERA melempar SecurityException
+  // yang menjatuhkan proses. Dinyatakan sebagai pernyataan POSITIF: pemeriksa
+  // yang cuma melarang sesuatu akan hijau begitu barisnya dihapus.
+  assert.match(manifest, /<uses-permission[^>]*android\.permission\.CAMERA/,
+    'izin CAMERA harus ada di manifes — tanpa itu ACTION_IMAGE_CAPTURE melempar SecurityException')
+  // Sejak Android 11 aplikasi lain tak terlihat tanpa <queries>; resolveActivity
+  // lalu selalu bilang "tak ada kamera" walau kameranya ada.
+  assert.match(manifest, /<queries>[\s\S]*android\.media\.action\.IMAGE_CAPTURE[\s\S]*<\/queries>/,
+    'tanpa <queries> IMAGE_CAPTURE, resolveActivity tak melihat aplikasi kamera')
+  // Fotonya diserahkan lewat content:// dari FileProvider sendiri, bukan extras
+  // (yang sejak Android 11 tak bisa dibaca) dan bukan file:// (ditolak sejak 7).
+  assert.match(manifest, /android:authorities="\$\{applicationId\}\.berkas"/,
+    'authority FileProvider untuk foto KTP hilang')
+  assert.match(manifest, /@xml\/file_paths_ktp/,
+    'daftar berkas yang boleh dibuka FileProvider foto KTP hilang')
+  // Izin pembaruan mandiri. Tanpa ini Android 8+ MENOLAK pemasangan APK baru,
+  // dan seluruh HP yang sudah beredar kehilangan kemampuan memperbarui diri —
+  // harus dipasang manual satu per satu. Pernah hilang saat merapikan manifes,
+  // dan tak ada pemeriksa yang menjaganya.
+  assert.match(manifest, /<uses-permission[^>]*android\.permission\.REQUEST_INSTALL_PACKAGES/,
+    'izin REQUEST_INSTALL_PACKAGES hilang → pembaruan mandiri mati, semua HP harus dipasang manual')
 })
 
 blok('halaman awal /dashboard, bukan akar situs', () => {
@@ -134,46 +194,30 @@ blok('halaman awal /dashboard, bukan akar situs', () => {
     'posisi halaman hilang tiap putar layar')
 })
 
-blok('penanda versi: diisi APK, menetap selama aplikasi terbuka', () => {
-  assert.match(main, /findViewById\(R\.id\.tvVersi\)/)
-  // Diisi dari BuildConfig — satu sumber versi, bukan ditulis ulang di kode.
-  assert.match(main, /tvVersi\.text\s*=\s*getString\(R\.string\.label_versi,\s*BuildConfig\.VERSI_NAMA\)/,
-    'versi harus dari BuildConfig.VERSI_NAMA')
-  // Dinyalakan SEBELUM halaman dimuat: kalau menunggu halaman, ia tak pernah
-  // muncul justru saat halaman gagal dimuat — saat paling dibutuhkan.
-  const isi = main.indexOf('tvVersi.text = getString')
-  const muat = main.indexOf('web.loadUrl(BERANDA + "/dashboard")')
-  assert.ok(isi > 0 && muat > 0 && isi < muat,
-    'versi harus ditulis sebelum halaman dimuat')
-  // Dinyatakan TAMPIL tepat setelah diisi: penandanya ber-atribut `gone` di
-  // layout, jadi tanpa baris ini ia tak pernah terlihat walau sudah diisi.
-  // Dijangkar langsung ke baris pengisian — `indexOf('tvVersi.text')` TIDAK
-  // cukup, karena `LogWeb.catatVersi(view)` di onPageFinished menambah
-  // kemunculan lain dan menutupi penyisipan yang salah tempat.
-  assert.match(main, /tvVersi\.text\s*=\s*getString\(R\.string\.label_versi, BuildConfig\.VERSI_NAMA\)[^\n]*\n[^\S\n]*tvVersi\.visibility\s*=\s*View\.VISIBLE/,
-    'versi harus dinyatakan tampil tepat setelah diisi → kalau tidak, penanda tetap tersembunyi')
-  // Disembunyikan saat halaman selesai? TIDAK. Penanda menetap supaya kasir
-  // bisa membacakan versinya kapan pun tanpa menutup-buka aplikasi. Dinyatakan
-  // sebagai pernyataan POSITIF, karena yang dijaga di sini justru tidak adanya
-  // baris — `!grep` tanpa uji positif adalah hijau palsu.
-  // 1-5 baris komentar, lalu `LogWeb.sambungkan(view)` — TANPA sisipan kode di
-  // antaranya, tepat satu baris per baris. Dihitung per BARIS (flag m), bukan
-  // per karakter: `[\s\S]{0,N}` selalu bisa melahap baris GONE yang disisipkan,
-  // sehingga uji itu hijau walau penandanya sudah kembali disembunyikan.
-  // Kelas `[^\S\n]` (bukan `\s`) sengaja: berkas proyek ini CRLF, dan `\s`
-  // ikut menelan `\r` sehingga `$` tak lagi menempel di ujung baris.
-  assert.match(main, /^[^\S\n]*\/\/ Penanda versi SENGAJA tidak disembunyikan[^\n]*\n([^\S\n]*\/\/[^\n]*\n){1,5}[^\S\n]*LogWeb\.sambungkan\(view\)$/m,
-    'penanda versi kembali disembunyikan → kasir tak bisa membaca versi kapan pun')
-  assert.ok(!/tvVersi\.visibility\s*=\s*View\.GONE/.test(main),
-    'tvVersi di-GONE-kan → penanda versi tak lagi menetap')
-})
-
-blok('penanda versi ada di layout dengan id yang dicari kode', () => {
+blok('versi: ditulis di bilah judul, dan TIDAK lagi memakan layar', () => {
+  // Dulu versi menempel sebagai banner `tvVersi` di bawah layar. Itu
+  // dikeluhkan: bannernya menghalangi dashboard. Versi pindah ke bilah judul
+  // — tempat Android memang menyediakan keterangan aplikasi — sehingga
+  // halaman web tak berkurang sedikit pun.
+  assert.match(main, /supportActionBar\?\.title\s*=\s*getString\(R\.string\.label_versi,\s*BuildConfig\.VERSI_NAMA\)/,
+    'versi harus ditulis di bilah judul dari BuildConfig.VERSI_NAMA')
   const layout = readFileSync(join(AKAR, 'app/src/main/res/layout/activity_main.xml'), 'utf8')
-  assert.match(layout, /android:id="@\+id\/tvVersi"/,
-    'findViewById(R.id.tvVersi) akan melempar NPE tanpa ini')
+  // Pernyataan POSITIF soal ketiadaan: banner versi tak boleh kembali. Diuji
+  // dengan menghitungnya harus NOL kali, bukan sekadar tak menyebut namanya.
+  assert.equal((layout.match(/tvVersi/g) || []).length, 0,
+    'tvVersi kembali ke layout → banner versi mengahalangi dashboard lagi')
+  assert.equal((main.match(/tvVersi/g) || []).length, 0,
+    'kode masih mencari tvVersi → sisa banner versi bawah layar')
+  // Bilah judul hanya ada kalau temanya menyediakannya. Theme AppCompat
+  // NoActionBar membuat supportActionBar null, dan judulnya hilang tanpa
+  // pesan apa pun — hijau palsu kalau ini tak diperiksa.
+  const tema = readFileSync(join(AKAR, 'app/src/main/res/values/themes.xml'), 'utf8')
+  // Yang diperiksa TAG-nya, bukan kata bebas: komentar di berkas itu sendiri
+  // menerangkan "BUKAN NoActionBar", dan mencari kata biasa akan menemukan
+  // komentar itu — hijau/gagal karena alasan yang salah.
+  assert.ok(!/parent="[^"]*NoActionBar"/.test(tema),
+    'tema NoActionBar → supportActionBar null, judul/versi tak akan tampil')
 })
-
 blok('versi ikut terkirim di laporan error', () => {
   // Halaman web hanya tahu versi webnya; laporan yang sampai ke DB harus
   // membawa versi APLIKASI yang menjalankannya.
@@ -233,6 +277,24 @@ blok('laporan yang terkirim disimpan di perangkat', () => {
   // Disimpan ke disk SEBELUM proses mati, bukan sesudah.
   assert.match(logweb, /setDefaultUncaughtExceptionHandler[\s\S]{0,900}?\.putString\(KUNCI, isi\(\)\)\.commit\(\)/,
     'jejak crash harus ditulis ke disk sebelum aplikasi keluar')
+  // AKAR dari "kirim log error lapor 0 kejadian": `baris` cuma hidup di memori
+  // proses, jadi begitu aplikasi keluar isinya hilang — yang tersisa hanya
+  // tulisan di penangkap crash. Karena itu catat() WAJIB menyimpan tiap
+  // kejadian, bukan hanya saat crash.
+  // Dihitung, bukan sekadar dicari: catat() memanggil simpanKeDisk() di DUA
+  // jalur — jalur ringkasan pengulangan dan jalur kejadian biasa. Kalau
+  // pencarian biasa dipakai, menghapus pemanggilan di jalur kejadian tetap
+  // lolos pemeriksaan, dan log kembali lapor 0 kejadian.
+  const badanCatat = logweb.slice(
+    logweb.indexOf('fun catat('), logweb.indexOf('private fun simpanKeDisk()'))
+  const simpan = (badanCatat.match(/simpanKeDisk\(\)/g) ?? []).length
+  assert.ok(simpan >= 2,
+    `catat() hanya menyimpan ke disk di ${simpan} jalur → kejadian biasa hilang saat aplikasi keluar, tombol kirim lapor 0 kejadian`)
+  // Dan disk ikut dikosongkan setelah kiriman sukses, supaya isi lama tak
+  // terbaca sebagai kejadian baru pada kiriman berikutnya.
+  const badanKosong = logweb.slice(logweb.indexOf('fun kosongkan()'))
+  assert.match(badanKosong, /simpanKeDisk\(\)/,
+    'kosongkan() tak membersihkan disk → kejadian lama ikut terkirim lagi')
 })
 
 blok('pemeriksa updater tak lagi memegang WebView', () => {
