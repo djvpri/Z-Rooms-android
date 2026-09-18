@@ -99,11 +99,30 @@ jobs:
           KEYSTORE_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
           KEYSTORE_KEY_PASSWORD: ${{ secrets.KEYSTORE_KEY_PASSWORD }}
         run: |
+          set -euo pipefail
           if [ -z "$KEYSTORE_B64" ]; then
             echo "::error::secret KEYSTORE_B64 kosong — tanpa itu APK jatuh ke keystore debug dan tak bisa dipasang menimpa versi resmi. Lihat catatan di dalam workflow."
             exit 1
           fi
+          # tanpa pipefail, base64 yang gagal (secret rusak/terpotong) tetap
+          # menghasilkan berkas kosong, build jatuh ke keystore DEBUG, dan yang
+          # muncul nanti pesan "sertifikat bukan CN=Z-Rooms" — bukan petunjuk
+          # bahwa secret-nya yang salah.
           echo "$KEYSTORE_B64" | base64 -d > zrooms-release.keystore
+          # buktikan hasil decode benar-benar keystore sebelum build. Dibaca
+          # magic header-nya, bukan lewat keytool: keytool tak selalu ada di
+          # PATH, dan keystore rusak yang lolos ke build membuat Gradle diam-
+          # diam memakai keystore DEBUG.
+          HDR=$(head -c 2 zrooms-release.keystore | od -An -tx1 | tr -d ' \n')
+          BYTES=$(wc -c < zrooms-release.keystore)
+          # 3082 = DER/PKCS12 (keystore ini PKCS12, bukan JKS cafe d2 44 44).
+          # Panjang dicek juga: base64 terpotong tetap mulai dgn 3082, jadi
+          # header saja meloloskan secret yang cuma separuh.
+          if [ "$HDR" != "3082" ] || [ "$BYTES" -lt 1000 ]; then
+            echo "::error::isi KEYSTORE_B64 bukan keystore yang sah (header $HDR, $BYTES byte — harus 3082/PKCS12 dan >=1000 byte). Salin ulang base64 SATU BARIS PENUH dari zrooms-release.keystore."
+            exit 1
+          fi
+          echo "keystore sah: $BYTES byte"
           # storeFile relatif terhadap app/, jadi ../zrooms-release.keystore.
           # Ditulis lewat brace group, bukan heredoc ber-indentasi: heredoc
           # dengan indentasi spasi menyisipkan spasi ke dalam nilainya dan
