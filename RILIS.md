@@ -1,131 +1,211 @@
-# Rilis Android Z-Rooms
+# Rilis ZXRoom — cara untuk agent maupun manusia
 
-Dua jalur: **CI GitHub** (disarankan) dan **lokal** (perlu keystore).
+Dokumen ini menjawab satu pertanyaan: **bagaimana cara menerbitkan rilis APK
+baru**, dan apa yang harus dibaca lebih dulu.
+
+Kalau kamu agent yang diminta merilis versi terbaru, baca sampai bagian
+"Jalur A" dan ikuti. Jangan mengarang langkah dari nol — seluruh rantai sudah
+diuji (42 pemeriksaan, lihat `scripts/verifikasi-rilis.sh`).
 
 ---
 
-## Jalur 1 — CI GitHub (tanpa keystore di mesin)
+## Ringkas: apa yang dibutuhkan untuk merilis
 
-Repo: https://github.com/djvpri/Z-Rooms-android
+| Bahan | Di mana | Siapa yang perlu |
+| --- | --- | --- |
+| Kode | repo PUBLIK `djvpri/Z-Rooms-android` | semua |
+| 4 rahasia (keystore base64, 2 sandi, alias) | GitHub Actions **Secrets** repo itu | tak seorang pun secara langsung |
+| Hak picu workflow | akun `djvpri` | jalur B |
+| Tombol "Run workflow" di UI | web GitHub | jalur A |
+| Build toolchain | tak ada — dijalankan runner GitHub | — |
 
-Alur: `Actions` → `rilis` → `Run workflow` → isi versi (mis. `1.0.3`) → Run.
+**Yang TIDAK dibutuhkan:** keystore lokal, token di kode, atau Android SDK lokal.
+Keystore hidup di Secrets sebagai base64; runner menuliskannya sendiri.
 
-Workflow `.github/workflows/rilis.yml` melakukan sendiri:
+**Keystore lokal hanya untuk build rilis di laptop.** Kalau laptop hilang,
+keystore bisa dibuat ulang dari berkas base64 di Secrets — jadi ia bukan satu
+titik gagal. Jangan pernah menaruhnya di repo publik.
 
-1. naikkan `versiNama` + `versiKode` di `alamat.json` (`versiKode` = sebelumnya + 1)
-2. tulis keystore + `app/keystore.properties` dari **Secrets**
-3. `./gradlew clean assembleDebug assembleRelease`
-4. jalankan pemeriksa: `check-android-apk.mjs` (18 blok) + `check-berkas-webview.mjs` (15 blok)
-5. salin APK ke `rilis/Z-Rooms-<versi>.apk`
-6. commit `alamat.json` + APK, dorong ke `main`
-7. buat tag `v<versi>` + GitHub Release dengan APK terlampir
+---
 
-### Secrets yang harus dipasang sekali
+## Jalur A — agent lain / siapa pun, lewat web GitHub (TANPA token)
 
-`Settings` → `Secrets and variables` → `Actions` → `New repository secret`
+Jalur ini tidak butuh kredensial apa pun, tetapi **butuh hak tulis ke repo**.
 
-| Nama | Isi |
-| --- | --- |
-| `KEYSTORE_B64` | isi `zrooms-release.keystore` dalam base64 (satu baris) |
-| `KEYSTORE_PASSWORD` | `storePassword` dari `keystore.properties` |
-| `KEYSTORE_ALIAS` | `keyAlias` — `zrooms` |
-| `KEYSTORE_KEY_PASSWORD` | `keyPassword` dari `keystore.properties` |
+1. Buka https://github.com/djvpri/Z-Rooms-android/actions/workflows/rilis.yml
+2. Klik **Run workflow** (kanan atas), pilih branch `main`.
+3. Isi input `versi` dengan versi baru, mis. `1.0.4`. **Wajib** — workflow
+   berhenti kalau kosong.
+4. Klik **Run workflow** hijau.
+5. Tunggu ~4 menit. Workflow melakukan semuanya:
+   naikkan versi → tulis keystore dari Secrets → build → periksa → arsip APK →
+   commit versi + arsip → push → tag `v1.0.4` → buat Release + lampirkan APK.
 
-Buat `KEYSTORE_B64`:
+Versi **harus naik** dari yang ada. Cek dulu versi sekarang:
 
 ```bash
-base64 -w0 zrooms-release.keystore
+curl -sS https://api.github.com/repos/djvpri/Z-Rooms-android/releases/latest \
+  | grep -oE '"tag_name": *"[^"]+"'
 ```
 
-(macOS: `base64 -i zrooms-release.keystore`)
-
-Nilai keempat secret itu **tidak** ditulis di repo ini. Simpan di tempat
-rahasia milikmu (pengelola sandi).
-
-### Kalau `KEYSTORE_B64` kosong
-
-Workflow **berhenti** dengan pesan yang jelas. Itu disengaja: build tanpa
-keystore produksi jatuh ke keystore **debug**, APK-nya jadi, tapi Android
-menolak memasangnya menimpa versi resmi di perangkat kasir — dan itu baru
-ketahuan saat kasir memasangnya.
+> **Kalau kamu agent:** jalur ini tidak bisa kamu kerjakan. Langkah 2–4 adalah
+> klik di peramban, bukan perintah. Kalau punya izin, pakai Jalur B. Kalau tidak,
+> minta pemilik repo menjalankannya — lampirkan langkah 1–4 di atas sebagai
+> instruksi persis, jangan menebak.
 
 ---
 
-## Jalur 2 — Lokal (perlu keystore)
+## Jalur B — agent dengan akses token (tanpa klik)
 
-Dua berkas ini **gitignored** (`*.keystore`, `keystore.properties`), jadi
-`git clone` tidak memberikannya. Salin manual ke:
-
-```
-zrooms-android/zrooms-release.keystore
-zrooms-android/app/keystore.properties
-```
-
-`keystore.properties`:
-
-```properties
-storeFile=../zrooms-release.keystore
-storePassword=<password>
-keyAlias=zrooms
-keyPassword=<password>
-```
-
-Jalankan:
+Butuh PAT `djvpri` dengan scope `repo` + `workflow`. Enam panggilan curl:
 
 ```bash
-cd /c/Users/KBK065/zrooms-android
-bash scripts/verify.sh        # build bersih + 18 blok APK + 15 blok WebView + 4 uji gigit
-cp app/build/outputs/apk/release/app-release.apk rilis/Z-Rooms-<versi>.apk
-git add rilis/Z-Rooms-<versi>.apk && git commit -m 'rilis: ...'
-git push && git tag -a v<versi> -m '...' && git push origin v<versi>
+# 0. Ambil token dari credential store (JANGAN cetak, JANGAN commit)
+printf 'protocol=https\nhost=github.com\n\n' | git credential fill \
+  | awk -F= '/^password=/{print substr($0,10)}'
+
+# 1. Lihat versi terakhir yang sudah terbit
+curl -sS --compressed --http1.1 \
+  https://api.github.com/repos/djvpri/Z-Rooms-android/releases/latest \
+  | grep -oE '"tag_name": *"[^"]+"'
+
+# 2. Picu workflow  (versi HARUS lebih tinggi dari langkah 1)
+curl -sS --compressed --http1.1 -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  https://api.github.com/repos/djvpri/Z-Rooms-android/actions/workflows/rilis.yml/dispatches \
+  -d '{"ref":"main","inputs":{"versi":"1.0.4"}}'
+# HTTP 204 = diterima. 422 = input salah. 401/403 = token kurang scope.
+
+# 3. Ambil id run terbaru.  CATATAN: respons memuat banyak field "id"
+#    (owner, repo, actor). `grep '"id"' | head -1` mengambil yang SALAH.
+#    Field yg benar ada di dalam workflow_runs[0].id.
+curl -sS --compressed --http1.1 -H "Authorization: Bearer $TOKEN" \
+  "https://api.github.com/repos/djvpri/Z-Rooms-android/actions/runs?per_page=1" \
+  | python -c "import json,sys; w=json.load(sys.stdin)['workflow_runs']; print(w[0]['id'] if w else '')"
+
+# 3b. Atau ambil langsung per-workflow (lebih pasti):
+curl -sS --compressed --http1.1 -H "Authorization: Bearer $TOKEN" \
+  "https://api.github.com/repos/djvpri/Z-Rooms-android/actions/workflows/rilis.yml/runs?per_page=1" \
+  | python -c "import json,sys; w=json.load(sys.stdin)['workflow_runs']; print(w[0]['id'] if w else '')"
+
+# 4. Pantau status  (queued -> in_progress -> completed)
+curl -sS --compressed --http1.1 -H "Authorization: Bearer $TOKEN" \
+  "https://api.github.com/repos/djvpri/Z-Rooms-android/actions/runs/$RUN_ID" \
+  | grep -oE '"status": *"[^"]+"|"conclusion": *"[^"]+"'
+
+# 5. Langkah mana yang gagal (kalau ada)
+curl -sS --compressed --http1.1 -H "Authorization: Bearer $TOKEN" \
+  "https://api.github.com/repos/djvpri/Z-Rooms-android/actions/runs/$RUN_ID/jobs" \
+  | grep -oE '"name": *"[^"]+"|"conclusion": *"[^"]+"'
+
+# 6. Log mentah langkah yg gagal
+curl -sSL --compressed --http1.1 -H "Authorization: Bearer $TOKEN" \
+  "https://api.github.com/repos/djvpri/Z-Rooms-android/actions/jobs/$JOB_ID/logs"
 ```
 
-Naikkan `versiNama` + `versiKode` di `alamat.json` **sebelum** build.
-Android menolak memasang `versionCode` yang sama atau lebih kecil.
+Catatan curl di Windows: selalu `--compressed --http1.1`. Tanpa itu sebagian
+proxy menolak. Jangan lewatkan token sebagai argumen yang terlihat di riwayat
+perintah — simpan di variabel.
+
+**Kalau token tak ada di mesinmu:** jangan mencoba jalur lain diam-diam. Beri
+tahu pemilik repo bahwa kamu butuh PAT dengan scope `repo`+`workflow`, atau
+minta ia memakai Jalur A.
 
 ---
 
-## Sertifikat produksi — patokan
+## Jalur C — rilis dari laptop sendiri
 
-**Setiap APK rilis wajib memakai sertifikat ini.** Kalau berbeda, Android
-menolak memasang menimpa dan kasir harus uninstall dulu (data WebView hilang).
+Hanya kalau GitHub Actions tidak bisa dipakai.
 
-| Item | Nilai |
-| --- | --- |
-| DN | `CN=Z-Rooms, OU=Dev, O=Z-Rooms, L=Jakarta, ST=DKI, C=ID` |
-| SHA-256 | `a9426745a4529a9fbb3fa2f86cadcca3db2208c31707d8d9abcd5d1e89f9a48e` |
-| SHA-1 | `21e8e814418a4b149435b50e5f1b23e90ff66486` |
-
-Sidik jari `zrooms-release.keystore` sendiri:
-
-```
-SHA-256 a00dcabbe4289b1b2c79fcd4be22ff187c5402d8fbd5c85b2f58ab971675cf58
-2 712 byte
-```
-
-Periksa APK mana pun:
+Prasyarat: `zrooms-release.keystore` + `app/keystore.properties` ada (keduanya
+gitignored), JDK 17, Android SDK build-tools 35.0.0.
 
 ```bash
-/c/Android/Sdk/build-tools/35.0.0/apksigner.bat verify --print-certs <apk>
+./gradlew.bat :app:assembleRelease
+bash scripts/verifikasi-rilis.sh          # verifikasi penuh
 ```
 
-`check-android-apk.mjs` sudah menegakkan ini: blok *"versi rilis memakai
-sertifikat yang sama dengan APK rilis resmi"* membandingkan SHA-256 APK baru
-dengan APK terakhir di `rilis/`.
+Rilis lokal **tidak** membuat tag/Release GitHub. Buat manual setelahnya, dan
+lampirkan APK — updater membaca aset `.apk` dari `/releases/latest`, jadi
+Release tanpa aset = update tak akan pernah terdeteksi pengguna.
+
+> Peringatan: APK yang ditandatangani keystore berbeda **tidak bisa** dipasang
+> menimpa yang terpasang. Android menolaknya dengan "app not installed". Pakai
+> keystore produksi yang sama, selalu.
 
 ---
 
-## Alamat situs di dalam APK
+## Verifikasi setelah rilis
 
-Satu sumber: `alamat.json`. `beranda` ditanam sebagai `BuildConfig.BERANDA`;
-`MainActivity.kt` membacanya dari sana, tidak menyalin. `check-android-apk.mjs`
-menggigit kalau nilainya disalin ulang.
+Ini bagian yang paling sering dilewatkan, dan yang membedakan rilis yang
+"tampak berhasil" dari yang benar-benar berhasil.
 
-```json
-{
-  "beranda": "https://zxroom.zomet.my.id",
-  "idPaket": "com.zrooms.app",
-  "versiNama": "1.0.2",
-  "versiKode": 3
-}
+```bash
+bash scripts/verifikasi-rilis.sh          # penuh, build dari nol (~3 menit)
+bash scripts/verifikasi-rilis.sh --cepat  # pakai APK yg sudah ada (~40 detik)
 ```
+
+Exit 0 = rantai utuh. Ia memeriksa hal-hal yang tak terlihat dari hijau/merah
+workflow: manifest **terkompilasi di dalam APK**, isi `file_paths.xml` yang
+sebenarnya, sha256 aset unduhan vs arsip, dan sertifikat penandatangan yang
+harus cocok agar update in-place diterima.
+
+**Setelah CI hijau, tetap periksa tiga ini secara manual** — skrip tidak bisa
+melihatnya:
+
+1. `releases/latest` = tag baru, dan **aset `.apk` benar-benar terlampir**.
+2. `versionCode` di APK naik dari rilis sebelumnya.
+3. Sertifikat APK baru = sertifikat rilis sebelumnya.
+
+Nomor 1 adalah penyebab paling umum update "tak muncul": Release terbit tapi
+aset APK lupa dilampirkan.
+
+---
+
+## Jebakan yang sudah memakan waktu (jangan diulang)
+
+Semua ini nyata dan sudah diuji. Baca sebelum menuduh kode aplikasi rusak.
+
+**Alat Windows menelan bukti kalau stderr dibisukan.** `aapt2.exe` dan
+`apksigner.bat` adalah binary Windows: mereka tidak paham path MSYS
+`/c/Users/...`. Tanpa `cygpath` mereka gagal, dan bila `2>/dev/null` dipasang,
+gejalanya jadi "keluaran kosong" yang tampak persis seperti bug kode. Skrip ini
+punya pembungkus `aaptx()` untuk itu. Jangan tambahkan `2>/dev/null`.
+
+**CRLF dari alat Windows membuat `grep` dan `[ = ]` berbohong.** `grep '^x$'`
+tak akan pernah cocok karena `\r` mendahului newline.
+
+**`dump xmlstrings` memberi prefix.** Keluarannya `String #0 : cache-path`, jadi
+pola `^cache-path$` salah. Dan assertion negatif seperti
+`! grep -qE '^(external-path|...)$'` akan **selalu lolos** tanpa pengupasan
+prefix — hijau palsu yang tidak menguji apa pun. Skrip ini memasangkannya dengan
+uji positif ("hitung untai terparsing ≥ 5") supaya parsing kosong langsung
+ketahuan.
+
+**MSYS `sha256sum` menyisipkan `\` di depan hash** ketika argumennya path
+Windows. Itu penanda escape, bukan CR. Ambil 64 hex pertama, jangan
+`awk '{print $1}'`.
+
+**Jangan bandingkan APK dengan `ls | head -1`.** Urutan alfabet memilih versi
+terlama; sha256 lalu dilaporkan "beda" padahal asetnya benar. Pilih arsip yang
+tag-nya sama.
+
+**Jangan tulis pembanding versi di pemeriksa.** Mengunci `versiNama`/`versiKode`
+membuat pemeriksa gagal begitu versi naik — persis yang mematahkan CI ZXRoom.
+Jaga **hubungan** antar data, bukan angkanya.
+
+**`versionCode` wajib masuk git.** Kalau hanya dinaikkan di runner, `main`
+berbohong soal apa yang dirilis dan agent berikutnya salah hitung.
+
+**`android-actions/setup-android@v3` jangan dipakai di runner ini.** Aksinya
+menganggap SDK praterpasang "salah versi" lalu menjalankan `sdkmanager tools`,
+paket yang sudah dihapus. SDK sudah ada; pakai langsung.
+
+---
+
+## Rujukan
+
+- Skill agent: `github-release-ci-tanpa-gh-cli` (pitfall #9–#12 berisi detail
+  teknis di atas, termasuk perintah diagnosis).
+- Pemeriksa repo: `scripts/check-berkas-webview.mjs`, `scripts/check-android-apk.mjs`.
+- Workflow: `.github/workflows/rilis.yml`.
