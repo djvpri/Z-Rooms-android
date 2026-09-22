@@ -280,10 +280,21 @@ object LogWeb {
      * HANYA level ERROR. Penangkap web sengaja hanya menangkap error; menyalin
      * `console.warn`/`console.log` ke sini membuat laporan penuh sampah dan
      * yang penting tenggelam.
+     *
+     * GEMA DIRI SENDIRI DILEWATI. [catat] mengirim tiap pesan ke halaman lewat
+     * event `zxr-apk-log`, yang diterjemahkan [sambungkan] menjadi
+     * `console.error('[APK] …')` — dan console.error level ERROR kembali ke
+     * sini. Tanpa penjaga ini, pesan berputar: tiap putaran menambah awalan
+     * `[APK] web: ` (pesan selalu "berbeda", pengulang [MAKS_SAMA] tak pernah
+     * terpicu) sampai 200 kejadian × ~550 karakter = 110 KB laporan yang
+     * nyaris seluruhnya gema. Terlihat produksi 2026-09-18 dan 2026-09-22.
      */
     fun dariConsole(msg: ConsoleMessage, web: WebView?): Boolean {
         if (msg.messageLevel() == ConsoleMessage.MessageLevel.ERROR) {
-            catat(web, "web: ${msg.message()} (${msg.sourceId()}:${msg.lineNumber()})")
+            val teks = msg.message()
+            if (!teks.startsWith("[APK] ")) {
+                catat(web, "web: $teks (${msg.sourceId()}:${msg.lineNumber()})")
+            }
         }
         return false
     }
