@@ -121,7 +121,10 @@ class MainActivity : AppCompatActivity() {
             mediaPlaybackRequiresUserGesture = false
             // Situs memblokir agen tak dikenal; tempelkan penanda versi kita
             // supaya sisi web bisa membedakan asal permintaan bila perlu.
-            userAgentString = "$userAgentString ZRoomsAndroid/1.0"
+            // Versi asli (bukan "1.0" tetap) supaya log di sisi web tahu APK
+            // mana yang mengirim — penting saat mendiagnosa tombol cetak mati
+            // di APK lama yang belum punya method versi().
+            userAgentString = "$userAgentString ZRoomsAndroid/${BuildConfig.VERSI_NAMA}"
         }
 
         // `__Host-` cookie menuntut HTTPS dan SameSite yang utuh; Android 5–6
