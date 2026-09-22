@@ -290,10 +290,18 @@ blok('satu sumber kebenaran: nilai tak disalin ulang di berkas lain', () => {
   assert.ok(awal > 0, 'build.gradle.kts: blok defaultConfig tak ditemukan')
 
   // Gradle harus MEMBACA dari alamat.json, bukan menuliskan nilainya.
+  // versiKode numeric diperiksa dengan pola lengkap `versionCode = N` —
+  // pola longgar `= N\n` memicu false positive saat versiKode bertabrakan
+  // dengan literal lain di blok (kasus nyata: versiKode 24 == minSdk 24,
+  // rilis 1.0.16 ditolak CI padahal Gradle-nya benar).
   for (const [kunci, nilai] of Object.entries({
     idPaket: janji.idPaket, versiNama: janji.versiNama, versiKode: janji.versiKode,
   })) {
-    assert.ok(!blokDefault.includes(`= "${nilai}"`) && !blokDefault.includes(`= ${nilai}\n`),
+    const literal =
+      typeof nilai === 'number'
+        ? `versionCode = ${nilai}`
+        : `= "${nilai}"`
+    assert.ok(!blokDefault.includes(literal),
       `build.gradle.kts menuliskan ${kunci} langsung — pakai bacaAlamat("${kunci}")`)
     assert.ok(app.includes(`bacaAlamat("${kunci}")`),
       `build.gradle.kts tidak membaca "${kunci}" dari alamat.json`)
