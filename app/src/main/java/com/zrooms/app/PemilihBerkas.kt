@@ -106,7 +106,7 @@ class PemilihBerkas(
         kelanjutanIzin = null
         if (!diberikan) {
             catat("izin kamera DITOLAK kasir")
-            batal("Izin kamera ditolak. Buka Pengaturan Android → Aplikasi → Z-Rooms → Izin, lalu nyalakan Kamera.")
+            batal("Izin kamera ditolak. Buka Pengaturan Android → Aplikasi → ZXRoom → Izin, lalu nyalakan Kamera.")
         }
         lanjut?.invoke()
     }

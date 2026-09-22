@@ -412,7 +412,7 @@ object PrinterBluetooth {
     @Throws(PesanKesalahanPrinter::class)
     fun cetak(naskah: String, alamat: String = "") {
         if (!izinDiberikan(konteksApl)) {
-            throw PesanKesalahanPrinter("Izin Bluetooth belum diberikan. Buka Pengaturan Android → Aplikasi → Z-Rooms → Izin.")
+            throw PesanKesalahanPrinter("Izin Bluetooth belum diberikan. Buka Pengaturan Android → Aplikasi → ZXRoom → Izin.")
         }
         val adapter = adapter() ?: throw PesanKesalahanPrinter("Perangkat ini tidak punya Bluetooth.")
         if (!adapter.isEnabled) {
@@ -475,7 +475,7 @@ object PrinterBluetooth {
             mulaiPemantau(s)
         } catch (e: SecurityException) {
             tutup()
-            throw PesanKesalahanPrinter("Izin Bluetooth ditolak Android. Buka Pengaturan Android → Aplikasi → Z-Rooms → Izin.")
+            throw PesanKesalahanPrinter("Izin Bluetooth ditolak Android. Buka Pengaturan Android → Aplikasi → ZXRoom → Izin.")
         } catch (e: IOException) {
             tutup()
             throw PesanKesalahanPrinter("Tidak bisa tersambung ke printer ${perangkat.name ?: perangkat.address}. Pastikan printer menyala, lalu coba lagi.")
