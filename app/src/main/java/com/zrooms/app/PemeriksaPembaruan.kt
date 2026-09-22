@@ -72,17 +72,17 @@ object PemeriksaPembaruan {
                     return@execute
                 }
                 val (tag, urlApk) = rilis
-                val angkaBaru = angkaVersi(tag)
-                if (angkaBaru == null) {
+                if (angkaVersi(tag) == null) {
                     LogWeb.catat(null, "pembaruan: tag rilis \"$tag\" tak dikenali")
                     return@execute
                 }
-                // Hanya versi yang LEBIH BARU. Versi sama atau lebih tua
-                // ditolak: pemasang paket akan menolaknya juga, dan lebih baik
-                // tak mengunduh 2,5 MB untuk sesuatu yang pasti gagal.
-                if (angkaBaru <= BuildConfig.VERSI_KODE) {
-                    LogWeb.catat(null, "pembaruan: versi terpasang ${BuildConfig.VERSI_KODE} " +
-                        "sudah terbaru (terbit $angkaBaru)")
+                // Hanya versi yang LEBIH BARU. Bandingkan versiNama sebagai
+                // tuple (1.0.12 > 1.0.11), bukan versiKode — versiKode naik
+                // per rilis dan tak selalu = patch+1, jadi perbandingan
+                // angka tunggal menyesatkan sejak 1.0.10.
+                if (!lebihBaru(tag)) {
+                    LogWeb.catat(null, "pembaruan: versi terpasang ${BuildConfig.VERSI_NAMA} " +
+                        "sudah terbaru (terbit $tag)")
                     return@execute
                 }
                 if (urlApk == null) {
@@ -90,7 +90,7 @@ object PemeriksaPembaruan {
                     return@execute
                 }
 
-                LogWeb.catat(null, "pembaruan: versi $angkaBaru tersedia, mengunduh ${urlApk.substringAfterLast('/')}")
+                LogWeb.catat(null, "pembaruan: versi $tag tersedia, mengunduh ${urlApk.substringAfterLast('/')}")
                 val berkas = unduh(konteks, urlApk)
                 LogWeb.catat(null, "pembaruan: unduhan selesai ${berkas.length()} byte")
                 pasang(konteks, berkas)
@@ -144,23 +144,37 @@ object PemeriksaPembaruan {
     }
 
     /**
-     * Angka versi dari tag rilis: "1.0.3" -> 4.
+     * Versi dari tag rilis sebagai daftar angka: "1.0.12" -> [1, 0, 12].
      *
-     * MEMAKAI ATURAN YANG SAMA dengan scripts/check-android-apk.mjs dan
-     * workflow rilis: versiKode selalu versiKode sebelumnya + 1, dan keduanya
-     * naik bersama. Jadi membandingkan versiKode terpasang dengan nomor urut
-     * versi rilis sudah cukup — tak perlu menebak dari tiga angka
-     * (major.minor.patch), yang aturannya berbeda dan bisa meleset.
-     *
-     * Yang dibandingkan adalah angka, bukan teks: "1.0.10" sebagai teks lebih
-     * kecil daripada "1.0.9", dan pembaruan akan terlewat diam-diam.
+     * Yang dibandingkan adalah angka per bagian, bukan teks: "1.0.10" sebagai
+     * teks lebih kecil daripada "1.0.9", dan pembaruan terlewat diam-diam.
      */
-    private fun angkaVersi(tag: String): Int? {
+    private fun angkaVersi(tag: String): List<Int>? {
         val bersih = tag.removePrefix("v").trim()
-        // Hanya yg berakhiran digit tunggal "1.0.N" yang bisa dipetakan.
-        // Lihat catatan di atas: versiKode = N + 1.
-        val cocok = Regex("^\\d+\\.\\d+\\.(\\d+)$").find(bersih) ?: return null
-        return cocok.groupValues[1].toIntOrNull()?.plus(1)
+        val bagian = bersih.split(".")
+        if (bagian.isEmpty()) return null
+        return bagian.map { it.toIntOrNull() ?: return null }
+    }
+
+    /** Benarkah `tag` lebih baru dari versi yang terpasang?
+     *
+     * Kenapa TIDAK memakai versiKode: versiKode naik +1 per rilis, sementara
+     * rumus lama menganggapnya = patch+1. Sejak 1.0.10 kedua skala itu
+     * berpisah (1.0.10 -> 12, bukan 11), sehingga pembaruan selalu dianggap
+     * "sudah terbaru" dan tak pernah terpasang.
+     */
+    private fun lebihBaru(tag: String): Boolean {
+        val baru = angkaVersi(tag) ?: return false
+        val terpasang = angkaVersi(BuildConfig.VERSI_NAMA) ?: return false
+        // zip saja akan memotong di bagian terpendek ("1.1" vs "1.1.0" dianggap
+        // sama) — sisa bagian pada yang lebih panjang harus dihitung ikut.
+        val n = maxOf(baru.size, terpasang.size)
+        for (i in 0 until n) {
+            val a = baru.getOrElse(i) { 0 }
+            val b = terpasang.getOrElse(i) { 0 }
+            if (a != b) return a > b
+        }
+        return false
     }
 
     /**
