@@ -161,44 +161,16 @@ class MainActivity : AppCompatActivity() {
             // tanpa pesan apa pun.
             override fun onPageFinished(view: WebView, url: String) {
                 LogWeb.sambungkan(view)
-                // Jembatan supaya halaman bisa memberi tahu APK saat log sudah
-                // terkirim. Didaftarkan ulang tiap halaman selesai karena
-                // addJavascriptInterface menempel pada konteks JS halaman.
-                //
-                // HANYA untuk host ZXRoom: jembatan ini bisa dipanggil skrip
-                // mana pun yang termuat di WebView, jadi memasangnya untuk
-                // semua alamat akan membuka jalur dari situs pihak ketiga.
+                // Jembatan ZXR_APK kini dipasang di onCreate (sebelum
+                // pemuatan pertama). Lihat catatan di tempat pemasangan.
                 if (url.startsWith(BERANDA)) {
-                    view.addJavascriptInterface(
-                        JembatanApk(applicationContext) { naskah -> cetakStruk(naskah) },
-                        "ZXR_APK",
-                    )
-                    // Sambung ke printer tersimpan sekali, saat halaman utama
-                    // selesai dimuat — bukan di onCreate: menyambung makan
-                    // waktu, dan menaruhnya di onCreate memperlambat halaman
-                    // pertama. Dipanggil tiap navigasi; `sambungOtomatis`
-                    // sendiri yang mengabaikan kalau sudah tersambung.
                     autoSambungPrinter()
                 }
-                // DIAGNOSA JEMBATAN (sementara, v1.0.15): laporan produksi
-                // 2026-09-22 bilang "tak ada ZXR_APK sama sekali" padahal
-                // User-Agent membuktikan halaman berjalan di APK — jadi blok
-                // addJavascriptInterface di atas bisa saja tak jalan, atau
-                // jembatannya lenyap setelah dipasang.
-                //
-                // Langsung console.error TANPA prefix [APK]: LogWeb.catat
-                // mengirim lewat event → console.error('[APK] …') → penangkap
-                // web melewati [APK], jadi diagnosa tak akan terlihat.
-                view.evaluateJavascript(
-                    "(function(){window.__zxrDiagnosaJembatan='typeof='+typeof window.ZXR_APK+' mulaiDgnBeranda=" + url.startsWith(BERANDA) + " url='+location.href;console.error('diagnosa-jembatan '+window.__zxrDiagnosaJembatan)})()",
-                    null,
-                )
                 // Kejadian selama pemuatan (saat halaman belum siap) dikirim
                 // menyusul, supaya tak hilang.
                 //
                 // `catat` di sini memang menyalin isi yang sudah tercatat: yang
                 // dituju sisi WEB, karena pengirim laporan ada di halaman web.
-                // Sisi APK menyimpan isinya sendiri di dalam LogWeb.
                 val tertunda = LogWeb.isi()
                 if (tertunda.isNotEmpty()) LogWeb.catat(view, "log APK saat pemuatan:\n$tertunda")
                 // Versi APK yang menjalankan halaman ini. Ditulis di sini (bukan
@@ -247,6 +219,24 @@ class MainActivity : AppCompatActivity() {
                 if (web.canGoBack()) web.goBack() else finish()
             }
         })
+
+        // Jembatan JS dipasang SEBELUM pemuatan pertama, di onCreate:
+        // addJavascriptInterface pada WebView Chromium modern hanya
+        // berlaku untuk dokumen yang dimuat SETELAH panggilan itu —
+        // memasangnya di onPageFinished (laku lama) berarti jembatan
+        // baru muncul di pemuatan berikutnya, dan navigasi SPA Next.js
+        // tak pernah memuat ulang → halaman web selalu melihat
+        // window.ZXR_APK undefined (kasus produksi 2026-09-22: tombol
+        // cetak mati di APK 1.0.13–1.0.16, typeof=undefined padahal
+        // blok pemasangan terbukti jalan).
+        //
+        // Keamanan tetap terjaga: shouldOverrideUrlLoading menolak host
+        // selain zomet.my.id — halaman luar tak pernah termuat di WebView
+        // ini, jadi jembatan tak bisa dipanggil situs pihak ketiga.
+        web.addJavascriptInterface(
+            JembatanApk(applicationContext) { naskah -> cetakStruk(naskah) },
+            "ZXR_APK",
+        )
 
         // Dipulihkan setelah putar layar supaya posisi tak kembali ke beranda.
         if (savedInstanceState != null) {

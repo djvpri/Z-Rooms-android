@@ -108,10 +108,20 @@ blok('jembatan JS dibatasi host ZXRoom', () => {
   // Dicari PEMANGGILANnya, bukan kemunculan kata: namanya juga muncul di
   // komentar di atasnya, dan mencari kata biasa akan menemukan komentar itu
   // lebih dulu — pemeriksaan jadi lulus/gagal karena alasan yang salah.
-  const i = main.indexOf('view.addJavascriptInterface(')
+  const i = main.indexOf('.addJavascriptInterface(')
   assert.ok(i > -1, 'jembatan ZXR_APK tidak dipasang')
-  assert.ok(
-    main.lastIndexOf('if (url.startsWith(BERANDA))', i) > -1,
+
+  // Batas host bisa dua bentuk, dan keduanya sah:
+  //   (a) penjaga `if (url.startsWith(BERANDA))` di sekitar pemasangan
+  //       (laku lama: dipasang di onPageFinished)
+  //   (b) shouldOverrideUrlLoading menolak host selain zomet.my.id —
+  //       pemasangan di onCreate SEBELUM loadUrl, yang justru satu-satunya
+  //       cara jembatan benar-benar terlihat halaman (Chromium modern hanya
+  //       menerapkan addJavascriptInterface pada pemuatan berikutnya).
+  const dijagaUrl = main.lastIndexOf('if (url.startsWith(BERANDA))', i) > -1
+  const tolakHostLuar = /host\.endsWith\("zomet\.my\.id"\)/.test(main) &&
+    /startActivity\(Intent\(Intent\.ACTION_VIEW/.test(main)
+  assert.ok(dijagaUrl || tolakHostLuar,
     'dipasang tanpa batasan host — situs pihak ketiga bisa memanggilnya')
 })
 

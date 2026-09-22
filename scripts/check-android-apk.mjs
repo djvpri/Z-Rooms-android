@@ -246,9 +246,16 @@ blok('jembatan JS hanya untuk host ZXRoom', () => {
   // lebih dulu — pemeriksaan jadi lulus/gagal karena alasan yang salah.
   const src = readFileSync(
     join(AKAR, 'app/src/main/java/com/zrooms/app/MainActivity.kt'), 'utf8')
-  const i = src.indexOf('view.addJavascriptInterface(')
+  const i = src.indexOf('.addJavascriptInterface(')
   assert.ok(i > -1, 'jembatan ZXR_APK tidak dipasang')
-  assert.ok(src.lastIndexOf('if (url.startsWith(BERANDA))', i) > -1,
+
+  // Batas host dua bentuk yang sah (lihat catatan serupa di
+  // check-berkas-webview.mjs): penjaga startsWith(BERANDA) di sekitar
+  // pemasangan, ATAU shouldOverrideUrlLoading yang menolak host luar.
+  const dijagaUrl = src.lastIndexOf('if (url.startsWith(BERANDA))', i) > -1
+  const tolakHostLuar = /host\.endsWith\("zomet\.my\.id"\)/.test(src) &&
+    /startActivity\(Intent\(Intent\.ACTION_VIEW/.test(src)
+  assert.ok(dijagaUrl || tolakHostLuar,
     'addJavascriptInterface dipasang tanpa batasan host')
 })
 
