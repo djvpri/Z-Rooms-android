@@ -190,7 +190,7 @@ class MainActivity : AppCompatActivity() {
                 // mengirim lewat event → console.error('[APK] …') → penangkap
                 // web melewati [APK], jadi diagnosa tak akan terlihat.
                 view.evaluateJavascript(
-                    "console.error('diagnosa-jembatan: typeof ZXR_APK=' + typeof window.ZXR_APK + ' mulaiDgnBeranda=" + url.startsWith(BERANDA) + " url=' + location.href)",
+                    "(function(){window.__zxrDiagnosaJembatan='typeof='+typeof window.ZXR_APK+' mulaiDgnBeranda=" + url.startsWith(BERANDA) + " url='+location.href;console.error('diagnosa-jembatan '+window.__zxrDiagnosaJembatan)})()",
                     null,
                 )
                 // Kejadian selama pemuatan (saat halaman belum siap) dikirim
