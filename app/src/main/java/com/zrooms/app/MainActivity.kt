@@ -174,11 +174,27 @@ class MainActivity : AppCompatActivity() {
                         "ZXR_APK",
                     )
                     // Sambung ke printer tersimpan sekali, saat halaman utama
-                    // selesai dimuat — bukan saat onCreate: menyambung makan
+                    // selesai dimuat — bukan di onCreate: menyambung makan
                     // waktu, dan menaruhnya di onCreate memperlambat halaman
                     // pertama. Dipanggil tiap navigasi; `sambungOtomatis`
                     // sendiri yang mengabaikan kalau sudah tersambung.
                     autoSambungPrinter()
+                }
+                // DIAGNOSA JEMBATAN (sementara, v1.0.14): laporan produksi
+                // 2026-09-22 bilang "tak ada ZXR_APK sama sekali" padahal
+                // User-Agent membuktikan halaman berjalan di APK 1.0.13 —
+                // jadi blok di atas bisa saja tidak jalan, atau jembatannya
+                // lenyap setelah dipasang. Baris ini mencatat FAKTA (url yang
+                // diterima, hasil startsWith, typeof ZXR_APK pasca-pasang)
+                // supaya laporan berikutnya menjawab yang mana.
+                view.evaluateJavascript(
+                    "(typeof window.ZXR_APK)",
+                ) { hasil ->
+                    val jenis = hasil?.trim() ?: "null"
+                    LogWeb.catat(
+                        view,
+                        "diagnosa jembatan: url=$url mulaiDgnBeranda=${url.startsWith(BERANDA)} typeof ZXR_APK=$jenis",
+                    )
                 }
                 // Kejadian selama pemuatan (saat halaman belum siap) dikirim
                 // menyusul, supaya tak hilang.
