@@ -180,22 +180,19 @@ class MainActivity : AppCompatActivity() {
                     // sendiri yang mengabaikan kalau sudah tersambung.
                     autoSambungPrinter()
                 }
-                // DIAGNOSA JEMBATAN (sementara, v1.0.14): laporan produksi
+                // DIAGNOSA JEMBATAN (sementara, v1.0.15): laporan produksi
                 // 2026-09-22 bilang "tak ada ZXR_APK sama sekali" padahal
-                // User-Agent membuktikan halaman berjalan di APK 1.0.13 —
-                // jadi blok di atas bisa saja tidak jalan, atau jembatannya
-                // lenyap setelah dipasang. Baris ini mencatat FAKTA (url yang
-                // diterima, hasil startsWith, typeof ZXR_APK pasca-pasang)
-                // supaya laporan berikutnya menjawab yang mana.
+                // User-Agent membuktikan halaman berjalan di APK — jadi blok
+                // addJavascriptInterface di atas bisa saja tak jalan, atau
+                // jembatannya lenyap setelah dipasang.
+                //
+                // Langsung console.error TANPA prefix [APK]: LogWeb.catat
+                // mengirim lewat event → console.error('[APK] …') → penangkap
+                // web melewati [APK], jadi diagnosa tak akan terlihat.
                 view.evaluateJavascript(
-                    "(typeof window.ZXR_APK)",
-                ) { hasil ->
-                    val jenis = hasil?.trim() ?: "null"
-                    LogWeb.catat(
-                        view,
-                        "diagnosa jembatan: url=$url mulaiDgnBeranda=${url.startsWith(BERANDA)} typeof ZXR_APK=$jenis",
-                    )
-                }
+                    "console.error('diagnosa-jembatan: typeof ZXR_APK=' + typeof window.ZXR_APK + ' mulaiDgnBeranda=" + url.startsWith(BERANDA) + " url=' + location.href)",
+                    null,
+                )
                 // Kejadian selama pemuatan (saat halaman belum siap) dikirim
                 // menyusul, supaya tak hilang.
                 //
