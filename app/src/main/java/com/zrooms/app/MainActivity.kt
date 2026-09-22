@@ -1,8 +1,11 @@
 package com.zrooms.app
 
+import android.app.AlertDialog
 import android.app.DownloadManager
+import android.bluetooth.BluetoothDevice
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -17,7 +20,9 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.ProgressBar
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 
 /**
  * Z-Rooms versi Android: WebView tipis di atas situs produksi Z-Rooms.
@@ -165,6 +170,12 @@ class MainActivity : AppCompatActivity() {
                         JembatanApk(applicationContext) { naskah -> cetakStruk(naskah) },
                         "ZXR_APK",
                     )
+                    // Sambung ke printer tersimpan sekali, saat halaman utama
+                    // selesai dimuat — bukan saat onCreate: menyambung makan
+                    // waktu, dan menaruhnya di onCreate memperlambat halaman
+                    // pertama. Dipanggil tiap navigasi; `sambungOtomatis`
+                    // sendiri yang mengabaikan kalau sudah tersambung.
+                    autoSambungPrinter()
                 }
                 // Kejadian selama pemuatan (saat halaman belum siap) dikirim
                 // menyusul, supaya tak hilang.
@@ -309,7 +320,103 @@ class MainActivity : AppCompatActivity() {
         jalankanJs(JembatanApk.hasilCetakJs(ok, pesan))
     }
 
+    // -------------------------------------------------------------------------
+    // Dialog pemilih printer (pola Z1 Label) + auto-connect saat app buka
+    // -------------------------------------------------------------------------
+
+    /** Dialog pemilih printer yang sedang tampil, atau null. */
+    private var dialogPrinter: AlertDialog? = null
+    /** Sedang memindai perangkat Bluetooth? */
+    private var sedangMemindai = false
+
+    /**
+     * Buka dialog pemilih printer bawaan Android.
+     *
+     * Dialognya ada di sini, bukan di halaman web: daftar perangkat Bluetooth
+     * berubah tiap detik saat memindai, dan melewatkannya lewat jembatan JS
+     * berarti memompa daftar bolak-balik tiap perangkat ditemukan. Dialog
+     * native menyegarkan sendiri.
+     *
+     * Dipanggil dari [JembatanApk.pilihPrinter] lewat companion object —
+     * jembatan tak boleh memegang Activity.
+     */
+    fun tampilkanDialogPrinter() {
+        runOnUiThread { isiDialogPrinter() }
+    }
+
+    /**
+     * Isi dialog dengan daftar perangkat terpasang + hasil pindai.
+     */
+    private fun isiDialogPrinter() {
+        val bonded = PrinterBluetooth.daftarLengkap()
+        val scan = if (sedangMemindai) PrinterBluetooth.perangkatDitemukan() else emptyList()
+
+        // Gabung: bonded + hasil scan, tak ada ganda.
+        val merged = LinkedHashMap<String, Pair<String, String>>()
+        bonded.forEach { (nama, alamat) -> merged[alamat] = nama to alamat }
+        scan.forEach { merged[it.address] = (it.name ?: it.address) to it.address }
+        val list = merged.values.toList()
+
+        val names = list.map { it.first + "  ·  " + it.second }.toTypedArray()
+
+        val builder = AlertDialog.Builder(this)
+            .setTitle(if (sedangMemindai) "Memindai… (${list.size})" else "Pilih Printer")
+            .setItems(names) { _, i ->
+                val (nama, alamat) = list[i]
+                PrinterBluetooth.simpanPrinterExtern(alamat)
+                jalankanJs(JembatanApk.printerDipilihJs(nama, alamat))
+                // Sambung di background supaya cetak pertama cepat.
+                PrinterBluetooth.sambungOtomatis(alamat) { err ->
+                    runOnUiThread {
+                        if (err != null) LogWeb.catat(web, "bt: sambung gagal: $err")
+                    }
+                }
+            }
+            .setNeutralButton(if (sedangMemindai) "Berhenti scan" else "Scan perangkat") { _, _ ->
+                if (sedangMemindai) {
+                    sedangMemindai = false
+                    PrinterBluetooth.hentikanPindai()
+                } else {
+                    sedangMemindai = true
+                    PrinterBluetooth.saatDitemukan = { runOnUiThread { tampilkanDialogPrinter() } }
+                    PrinterBluetooth.mulaiPindai()
+                }
+                tampilkanDialogPrinter()
+            }
+            .setOnCancelListener {
+                // Dibatalkan: kasir tak pilih apa pun.
+                jalankanJs(JembatanApk.printerDipilihJs(null, null))
+            }
+
+        dialogPrinter?.dismiss()
+        dialogPrinter = builder.show()
+    }
+
+    /**
+     * Sambung ke printer tersimpan saat aplikasi dibuka.
+     *
+     * Di background, bukan di onCreate: menyambung butuh beberapa detik, dan
+     * membekukan onCreate membuat halaman pertama muncul terlambat. Kalau
+     * belum ada izin, lewati — cetak nanti yang memintanya.
+     */
+    private fun autoSambungPrinter() {
+        if (PrinterBluetooth.tersambung()) return
+        if (!PrinterBluetooth.izinDiberikan(this)) return
+        PrinterBluetooth.saatStatusBerubah = { tersambung ->
+            runOnUiThread {
+                jalankanJs(JembatanApk.statusPrinterJs(tersambung))
+            }
+        }
+        PrinterBluetooth.sambungOtomatis() { err ->
+            if (err != null && err != "belum ada printer tersimpan") {
+                LogWeb.catat(web, "bt: auto-connect gagal: $err")
+            }
+        }
+    }
+
     override fun onDestroy() {
+        PrinterBluetooth.hentikanPindai()
+        dialogPrinter?.dismiss()
         // Dijaga `isInitialized`: kalau onCreate gagal sebelum baris
         // `web = findViewById(...)`, referensi ini belum terisi dan membacanya
         // melempar UninitializedPropertyAccessException — aplikasi tak bisa
@@ -357,6 +464,21 @@ class MainActivity : AppCompatActivity() {
                     // bisa dilakukan, dan melempar dari sini hanya menambah
                     // crash di atas masalah aslinya.
                 }
+            }
+        }
+
+        /**
+         * Buka dialog pemilih printer dari jembatan JS.
+         *
+         * Jembatan tak boleh memegang Activity, jadi ia memanggil method
+         * statis ini. Activity yang sedang aktif didapat dari `webAktif`
+         * (yang menyimpan referensi WebView — dan WebView menyimpan Activity).
+         */
+        fun bukaDialogPrinter() {
+            val w = webAktif ?: return
+            w.post {
+                val act = w.context as? MainActivity ?: return@post
+                act.tampilkanDialogPrinter()
             }
         }
     }

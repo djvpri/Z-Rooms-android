@@ -127,7 +127,7 @@ blok('jembatan JS sempit: tanpa jalur perintah & hanya menerima string', () => {
   //      melakukan sesuatu, bukan cuma melaporkan;
   //   3. setiap metode punya blok komentar tepat di atasnya, sehingga metode
   //      baru tak bisa diselundupkan tanpa alasan tertulis.
-  const diizinkanKembalikan = ['daftarPrinter', 'printerTersimpan', 'versi']
+  const diizinkanKembalikan = ['daftarPrinter', 'printerTersimpan', 'namaPrinterTersimpan', 'statusPrinter', 'versi']
 
   const nama = [...jembatan.matchAll(/fun (\w+)\(/g)].map((m) => m[1])
   assert.ok(nama.length >= 2, 'metode jembatan hilang')

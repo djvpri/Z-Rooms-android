@@ -88,9 +88,46 @@ class JembatanApk(
         return PrinterBluetooth.daftarPrinter().joinToString("\n")
     }
 
-    /** Alamat printer terakhir yang berhasil dipakai, "" kalau belum ada. */
+    /** Alamat printer terakhir yang berhasil dipakai, "address name" atau "address". */
     @JavascriptInterface
     fun printerTersimpan(): String = PrinterBluetooth.printerTersimpan()
+
+    /**
+     * Nama printer tersimpan (bukan alamat MAC) — lebih enak dibaca kasir.
+     * Kosong kalau belum pernah mencetak.
+     */
+    @JavascriptInterface
+    fun namaPrinterTersimpan(): String {
+        val alamat = PrinterBluetooth.printerTersimpan()
+        if (alamat.isBlank()) return ""
+        return PrinterBluetooth.namaPerangkat(alamat) ?: alamat
+    }
+
+    /**
+     * Apakah socket printer sedang hidup?
+     *
+     * Halaman memakai ini untuk menampilkan status sambungan tanpa harus
+     * mencetak sesuatu. `false` bukan berarti rusak — bisa saja sengaja
+     * belum disambung.
+     */
+    @JavascriptInterface
+    fun statusPrinter(): Boolean = PrinterBluetooth.tersambung()
+
+    /**
+     * Buka dialog pemilih printer bawaan Android (native).
+     *
+     * Dialognya ada di APK, bukan di web: daftar perangkat Bluetooth berubah
+     * tiap detik saat memindai, dan melewatkannya lewat jembatan JS berarti
+     * memompa daftar bolak-balik tiap perangkat ditemukan. Sekali pilih di
+     * dialog, hasilnya (nama+alamat) balik lewat `ZXR_PRINTER_DIPILIH(...)`.
+     *
+     * Halaman harus menyiapkan `window.ZXR_PRINTER_DIPILIH(nama, alamat)`
+     * sebelum memanggil ini; dipanggil `null, null` kalau dialog dibatalkan.
+     */
+    @JavascriptInterface
+    fun pilihPrinter() {
+        MainActivity.bukaDialogPrinter()
+    }
 
     /**
      * Kode versi APK. Dipakai halaman untuk memastikan APK-nya cukup baru:
@@ -120,5 +157,29 @@ class JembatanApk(
             val isi = org.json.JSONObject.quote(pesan)
             return "if (window.ZXR_CETAK_HASIL) window.ZXR_CETAK_HASIL($ok, $isi);"
         }
+
+        /**
+         * Panggil `window.ZXR_PRINTER_DIPILIH(nama, alamat)` di halaman.
+         *
+         * Di-escape sebagai string JSON — nama printer (dan alamat MAC) bisa
+         * memuat karakter yang merusak skrip kalau disisipkan mentah-mentah.
+         * `null` dikirim apa adanya (bukan string "null") saat dibatalkan,
+         * supaya halaman bisa membedakan "dibatalkan" dari "printer bernama null".
+         */
+        fun printerDipilihJs(nama: String?, alamat: String?): String {
+            val n = if (nama == null) "null" else org.json.JSONObject.quote(nama)
+            val a = if (alamat == null) "null" else org.json.JSONObject.quote(alamat)
+            return "if (window.ZXR_PRINTER_DIPILIH) window.ZXR_PRINTER_DIPILIH($n, $a);"
+        }
+
+        /**
+         * Laporkan status sambungan printer ke halaman: `window.ZXR_PRINTER_STATUS(true/false)`.
+         *
+         * Halaman memakainya untuk menampilkan indikator "printer tersambung"
+         * tanpa perlu mencetak dulu — karena sambungan kini dipasang saat
+         * aplikasi dibuka, statusnya bisa berubah tanpa halaman meminta apa pun.
+         */
+        fun statusPrinterJs(tersambung: Boolean): String =
+            "if (window.ZXR_PRINTER_STATUS) window.ZXR_PRINTER_STATUS($tersambung);"
     }
 }

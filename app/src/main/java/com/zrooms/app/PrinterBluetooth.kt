@@ -6,7 +6,10 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothSocket
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
@@ -66,6 +69,173 @@ object PrinterBluetooth {
     /** Alamat perangkat yang sedang tersambung — dipakai memutuskan perlu connect atau tidak. */
     @Volatile
     private var alamatTersambung: String? = null
+
+    // -------------------------------------------------------------------------
+    // Penemuan (discovery) & pemasangan (bonding)
+    //
+    // Pola ini disalin dari aplikasi Z1 Label, yang sudah dipakai harian dengan
+    // printer label Bluetooth. Tanpa penemuan, printer yang BELUM dipasangkan
+    // ke HP tak pernah bisa dipilih — kasir harus keluar aplikasi, buka
+    // Pengaturan Android, pasangkan di sana, lalu kembali.
+    // -------------------------------------------------------------------------
+
+    /** Perangkat yang ditemukan penemuan, di luar daftar yang sudah terpasang. */
+    private val ditemukan = LinkedHashMap<String, BluetoothDevice>()
+
+    /** Penerima siaran penemuan. Null = penemuan tak jalan. */
+    @Volatile
+    private var penerimaSiaran: BroadcastReceiver? = null
+
+    /**
+     * Dipanggil tiap kali perangkat baru ditemukan, supaya dialog pemilih bisa
+     * menyegarkan isinya. Jalan di thread penerima siaran.
+     */
+    var saatDitemukan: (() -> Unit)? = null
+
+    /** Daftar perangkat hasil penemuan. */
+    fun perangkatDitemukan(): List<BluetoothDevice> = ditemukan.values.toList()
+
+    /** Sedang menjalankan penemuan? */
+    fun sedangMemindai(): Boolean = penerimaSiaran != null
+
+    /**
+     * Mulai penemuan Bluetooth. Hasilnya masuk ke [perangkatDitemukan] dan
+     * [saatDitemukan] dipanggil tiap kali ada perangkat baru.
+     *
+     * Penemuan WAJIB dihentikan sebelum menyambung ([sambung] sudah
+     * melakukannya) — Bluetooth tak bisa connect sambil memindai.
+     */
+    @SuppressLint("MissingPermission")
+    fun mulaiPindai() {
+        if (penerimaSiaran != null) return // sudah jalan
+        val adapter = adapter() ?: return
+        if (!izinDiberikan(konteksApl)) return
+        ditemukan.clear()
+        val penerima = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) {
+                if (i.action != BluetoothDevice.ACTION_FOUND) return
+                val d: BluetoothDevice =
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        i.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        i.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+                    } ?: return
+                ditemukan[d.address] = d
+                saatDitemukan?.let { runCatching { it() } }
+            }
+        }
+        penerimaSiaran = penerima
+        runCatching {
+            konteksApl.registerReceiver(penerima, IntentFilter(BluetoothDevice.ACTION_FOUND))
+            adapter.startDiscovery()
+        }
+    }
+
+    /** Hentikan penemuan. Aman dipanggil walau tak pernah dimulai. */
+    @SuppressLint("MissingPermission")
+    fun hentikanPindai() {
+        penerimaSiaran?.let { runCatching { konteksApl.unregisterReceiver(it) } }
+        penerimaSiaran = null
+        runCatching { adapter()?.cancelDiscovery() }
+    }
+
+    /**
+     * Pasangkan (bond) perangkat, memicu dialog pairing sistem sekali, lalu
+     * tunggu sampai benar-benar terpasang.
+     *
+     * `createBond()` ASINKRON: langsung kembali walau bonding belum selesai.
+     * Tanpa menunggu, `connect()` berikutnya gagal dan kasir melihat pesan
+     * "tak bisa tersambung" tepat setelah ia menyetujui pairing. Batas ~12
+     * detik: lebih dari itu kasir pasti sudah melihat dialog itu tak muncul.
+     */
+    @SuppressLint("MissingPermission")
+    private fun pasangkan(alamat: String): Boolean {
+        val dev = try {
+            adapter()?.getRemoteDevice(alamat) ?: return false
+        } catch (_: SecurityException) {
+            return false
+        }
+        return try {
+            if (dev.bondState == BluetoothDevice.BOND_BONDED) true
+            else if (!dev.createBond()) false
+            else {
+                repeat(24) {
+                    if (dev.bondState == BluetoothDevice.BOND_BONDED) return true
+                    Thread.sleep(500)
+                }
+                dev.bondState == BluetoothDevice.BOND_BONDED
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Sambung ke printer di thread latar, dipakai saat aplikasi dibuka supaya
+     * cetakan pertama tak menunggu koneksi.
+     *
+     * Hasilnya lewat [saatStatusBerubah] + `hasil` (null = sukses). Kalau alamat
+     * kosong atau belum ada printer tersimpan, `hasil` dipanggil dengan pesan —
+     * dan itu bukan kegagalan aplikasi, hanya belum ada yang dipilih.
+     *
+     * Perangkat yang belum terpasang dipasangkan dulu ([pasangkan]).
+     */
+    fun sambungOtomatis(alamat: String? = null, hasil: ((err: String?) -> Unit)? = null) {
+        val tujuan = alamat?.takeIf { it.isNotBlank() } ?: printerTersimpan().takeIf { it.isNotBlank() }
+        if (tujuan == null) {
+            hasil?.invoke("belum ada printer tersimpan")
+            return
+        }
+        Thread {
+            if (tersambung() && alamatTersambung == tujuan) {
+                beriTahu(true)
+                hasil?.invoke(null)
+                return@Thread
+            }
+            val err = cobaSambung(tujuan)
+            hasil?.invoke(err)
+        }.apply { isDaemon = true; name = "zrooms-printer-autoconnect" }.start()
+    }
+
+    /**
+     * Inti sambungan: pilih perangkat, pasangkan kalau perlu, buka socket.
+     * Mengembalikan pesan kesalahan, atau null kalau berhasil.
+     */
+    @SuppressLint("MissingPermission")
+    private fun cobaSambung(alamat: String): String? {
+        if (!izinDiberikan(konteksApl)) return "Izin Bluetooth belum diberikan"
+        val adapter = adapter() ?: return "Perangkat ini tidak punya Bluetooth"
+        if (!adapter.isEnabled) return "Bluetooth sedang mati"
+        val dev = try {
+            adapter.getRemoteDevice(alamat)
+        } catch (_: Exception) {
+            return "Alamat printer tak dikenali: $alamat"
+        }
+        if (dev.bondState != BluetoothDevice.BOND_BONDED && !pasangkan(alamat)) {
+            return "Printer belum dipasangkan (pairing gagal)"
+        }
+        return try {
+            sambung(adapter, dev)
+            beriTahu(true)
+            null
+        } catch (e: PesanKesalahanPrinter) {
+            e.message
+        } catch (e: Exception) {
+            e.message ?: "Gagal tersambung"
+        }
+    }
+
+    /** Callback status sambungan; `true` = tersambung, `false` = putus. */
+    var saatStatusBerubah: ((tersambung: Boolean) -> Unit)? = null
+
+    /**
+     * Panggil [saatStatusBerubah] hanya saat nilainya benar-benar berubah —
+     * tanpa ini, tiap `sambung` yang berhasil mengirim duplikat ke UI.
+     */
+    private fun beriTahu(v: Boolean) {
+        saatStatusBerubah?.let { runCatching { it(v) } }
+    }
 
     private lateinit var konteksApl: Context
 
@@ -167,6 +337,43 @@ object PrinterBluetooth {
         }
     }
 
+    /**
+     * Nama perangkat dari alamat MAC, atau null kalau tak terpasang /
+     * Bluetooth tak bisa dibaca.
+     *
+     * Dipakai menampilkan nama printer tersimpan ke kasir — alamat MAC
+     * (`AA:BB:CC:...`) tak memberi tahu apa pun, nama ("RPP02N") yang dikenali.
+     */
+    @SuppressLint("MissingPermission")
+    fun namaPerangkat(alamat: String): String? {
+        if (!izinDiberikan(konteksApl)) return null
+        val adapter = adapter() ?: return null
+        return try {
+            adapter.bondedDevices.orEmpty()
+                .firstOrNull { it.address.equals(alamat, ignoreCase = true) }
+                ?.name
+        } catch (e: SecurityException) {
+            null
+        }
+    }
+
+    /**
+     * Daftar perangkat Bluetooth terpasang sebagai pasangan (nama, alamat).
+     *
+     * Dialog pemilih butuh KEDUANYA: nama untuk ditampilkan, alamat untuk
+     * disimpan dan dipakai menyambung.
+     */
+    @SuppressLint("MissingPermission")
+    fun daftarLengkap(): List<Pair<String, String>> {
+        if (!izinDiberikan(konteksApl)) return emptyList()
+        val adapter = adapter() ?: return emptyList()
+        return try {
+            adapter.bondedDevices.orEmpty().map { (it.name ?: it.address) to it.address }
+        } catch (e: SecurityException) {
+            emptyList()
+        }
+    }
+
     /** Alamat MAC printer tersimpan, "" kalau belum pernah berhasil mencetak. */
     fun printerTersimpan(): String = konteksApl
         .getSharedPreferences(NAMA_PREF, Context.MODE_PRIVATE)
@@ -177,6 +384,15 @@ object PrinterBluetooth {
         konteksApl.getSharedPreferences(NAMA_PREF, Context.MODE_PRIVATE)
             .edit().putString(KUNCI_PRINTER, alamat).apply()
     }
+
+    /**
+     * Simpan alamat printer dari dialog pemilih.
+     *
+     * Dipanggil dari [MainActivity] saat kasir memilih printer di dialog native.
+     * `private` tak bisa karena dialog ada di Activity — dibuat `public` ini
+     * satu-satunya pintu untuk menulis alamat dari luar.
+     */
+    fun simpanPrinterExtern(alamat: String) = simpanPrinter(alamat)
 
     private fun adapter(): BluetoothAdapter? =
         (konteksApl.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
@@ -328,6 +544,7 @@ object PrinterBluetooth {
         keluaran = null
         socket = null
         alamatTersambung = null
+        beriTahu(false)
     }
 
     /**
