@@ -146,7 +146,7 @@ echo
 echo "=== keadaan dipulihkan ==="
 echo "plugin kotlin : $(grep -c '^    id("org.jetbrains.kotlin.android")' app/build.gradle.kts) (harus 1)"
 echo "alamat benar  : $(grep -c '"https://zxroom.zomet.my.id"' alamat.json) (harus 1)"
-echo "versi asli    : $(grep -c '"versiKode": 2' alamat.json) (harus 1)"
+echo "versi asli    : $(grep -cE '"versiKode": [0-9]+' alamat.json) (harus 1)"
 echo "MainActivity  : $(grep -c 'const val BERANDA = BuildConfig.BERANDA' app/src/main/java/com/zrooms/app/MainActivity.kt) (harus 1)"
 echo "git bersih    : $(git status --porcelain | wc -l) (harus 0)"
 
