@@ -74,7 +74,7 @@ class JembatanApk(
                 return
             }
             // Bungkus callback cetakStruk: exception yang sampai ke luar
-            // @JavascriptInterface ditangkap WebView sebagai "Error invoking
+            // jembatan JS ditangkap WebView sebagai "Error invoking
             // cetak" — pesan asli (mis. "Belum ada printer yang dipasangkan")
             // hilang. Tangkap di sini agar pesan kasir-friendly sampai ke
             // halaman lewat ZXR_CETAK_HASIL.
