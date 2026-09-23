@@ -382,11 +382,26 @@ class MainActivity : AppCompatActivity() {
                 if (sedangMemindai) {
                     sedangMemindai = false
                     PrinterBluetooth.hentikanPindai()
-                } else {
-                    sedangMemindai = true
-                    PrinterBluetooth.saatDitemukan = { runOnUiThread { tampilkanDialogPrinter() } }
-                    PrinterBluetooth.mulaiPindai()
+                    tampilkanDialogPrinter()
+                    return@setNeutralButton
                 }
+                // Izin Bluetooth diminta DI SINI sebelum memindai. Dulu tombol
+                // ini langsung memanggil mulaiPindai(), yang memeriksa izin
+                // lalu KELUAR DIAM-DIAM kalau belum diberi. Kasir yang membuka
+                // dialog printer sebelum pernah mencetak tak pernah melihat
+                // dialog izin, dan pemindaian selalu kosong tanpa penjelasan.
+                val kurang = PrinterBluetooth.izinDibutuhkan().filter {
+                    checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                }
+                if (kurang.isNotEmpty()) {
+                    naskahTertunda = null
+                    LogWeb.catat(web, "izin Bluetooth diminta dari dialog printer: ${kurang.joinToString(",")}")
+                    mintaIzinBluetooth.launch(kurang.toTypedArray())
+                    return@setNeutralButton
+                }
+                sedangMemindai = true
+                PrinterBluetooth.saatDitemukan = { runOnUiThread { tampilkanDialogPrinter() } }
+                PrinterBluetooth.mulaiPindai()
                 tampilkanDialogPrinter()
             }
             .setOnCancelListener {
