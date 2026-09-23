@@ -97,7 +97,19 @@ class JembatanApk(
     @JavascriptInterface
     fun daftarPrinter(): String {
         if (!PrinterBluetooth.izinDiberikan(konteks)) return ""
-        return PrinterBluetooth.daftarPrinter().joinToString("\n")
+        val daftar = PrinterBluetooth.daftarLengkap()
+        // Status pairing dicatat tiap daftar diminta: kalau kasir gagal cetak
+        // dan laporan bilang "0 printer terpasangkan", penyebabnya pairing —
+        // tanpa baris ini laporan hanya bilang "cetak gagal" tanpa sebab.
+        val tersimpan = PrinterBluetooth.printerTersimpan()
+        val tersimpanOk = tersimpan.isBlank() || daftar.any { it.second.equals(tersimpan, ignoreCase = true) }
+        LogWeb.catat(
+            null,
+            "bt-pair: ${daftar.size} printer terpasangkan" +
+                (if (daftar.isEmpty()) "" else " (${daftar.joinToString(",") { it.first }})") +
+                (if (tersimpan.isBlank()) "" else if (tersimpanOk) ", printer tersimpan ada di daftar" else ", PRINTER TERSIMPAN TAK DIPASANGKAN: $tersimpan")
+        )
+        return daftar.joinToString("\n") { it.first }
     }
 
     /** Alamat printer terakhir yang berhasil dipakai, "address name" atau "address". */
