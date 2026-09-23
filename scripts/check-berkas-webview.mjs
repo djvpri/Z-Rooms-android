@@ -405,8 +405,9 @@ blok('cetak: izin Bluetooth & penguraian naskah ESC/POS', () => {
 
   // Cetak WAJIB di thread lain: menyambung Bluetooth memblokir, dan di thread
   // utama seluruh halaman web membeku. Bisa `Thread {` atau `Thread(null, {`
-  // kalau stackSize ditentukan.
-  assert.match(main, /Thread\([^)]*\)?\s*\{[\s\S]{0,400}?PrinterBluetooth\.cetak\(/,
+  // kalau stackSize ditentukan. Cek izin kini di dalam body thread, jadi
+  // jaraknya ke pemanggilan cetak lebih panjang (batas 1400).
+  assert.match(main, /Thread\([^)]*\)?\s*\{[\s\S]{0,1400}?PrinterBluetooth\.cetak\(/,
     'cetak dijalankan di thread utama — halaman web akan membeku')
 
   // UUID SPP adalah standar Bluetooth; salah ketik = tak ada printer yang cocok.
