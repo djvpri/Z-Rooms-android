@@ -306,40 +306,43 @@ class MainActivity : AppCompatActivity() {
 
     /** Kirim naskah ke printer di thread latar, lalu laporkan hasilnya ke halaman. */
     private fun kerjakanCetak(naskah: String) {
-            val utas = Thread {
-                try {
-                    PrinterBluetooth.cetak(naskah)
-                    laporCetak(true, "Nota terkirim ke printer.")
-                } catch (e: PesanKesalahanPrinter) {
-                    // Pesannya sudah disusun untuk kasir — diteruskan apa adanya.
-                    laporCetak(false, e.message ?: "Cetak gagal.")
-                } catch (e: Throwable) {
-                    // Throwable, bukan Exception: Error (NoClassDefFound,
-                    // OutOfMemoryError) tak ikut hierarki Exception. Jejak
-                    // tumpukan disertakan — pesan saja pernah tak cukup untuk
-                    // tahu baris mana yang gagal.
-                    laporCetak(false, "Cetak gagal: ${e.javaClass.simpleName}: ${e.message ?: "-"}")
-                    LogWeb.catat(null, "cetak: throwable — ${jejak(e)}")
-                }
+        // Stack 8 MB, bukan bawaan (~1 MB): tumpukan Bluetooth Android
+        // (createRfcommSocket → connect → write) cukup dalam sampai pernah
+        // memicu StackOverflowError 1039KB pada thread bawaan.
+        val utas = Thread(null, {
+            try {
+                PrinterBluetooth.cetak(naskah)
+                laporCetak(true, "Nota terkirim ke printer.")
+            } catch (e: PesanKesalahanPrinter) {
+                // Pesannya sudah disusun untuk kasir — diteruskan apa adanya.
+                laporCetak(false, e.message ?: "Cetak gagal.")
+            } catch (e: Throwable) {
+                // Throwable, bukan Exception: Error (NoClassDefFound,
+                // OutOfMemoryError) tak ikut hierarki Exception. Jejak
+                // tumpukan disertakan — pesan saja pernah tak cukup untuk
+                // tahu baris mana yang gagal.
+                laporCetak(false, "Cetak gagal: ${e.javaClass.simpleName}: ${e.message ?: "-"}")
+                LogWeb.catat(null, "cetak: throwable — ${jejak(e)}")
             }
-            // Penangkap terakhir: kalau pelaporan di atas sendiri melempar,
-            // Thread.UncaughtExceptionHandler default hanya mencetak ke logcat —
-            // yang tak pernah sampai ke laporan kasir.
-            utas.setUncaughtExceptionHandler { _, e ->
-                LogWeb.catat(null, "cetak: utas mati — ${jejak(e)}")
-                laporCetak(false, "Cetak gagal tak terduga: ${e.javaClass.simpleName}")
-            }
-            utas.start()
+        }, "zrooms-cetak", TUMPUKAN_CETAK)
+        // Penangkap terakhir: kalau pelaporan di atas sendiri melempar,
+        // Thread.UncaughtExceptionHandler default hanya mencetak ke logcat —
+        // yang tak pernah sampai ke laporan kasir.
+        utas.setUncaughtExceptionHandler { _, e ->
+            LogWeb.catat(null, "cetak: utas mati — ${jejak(e)}")
+            laporCetak(false, "Cetak gagal tak terduga: ${e.javaClass.simpleName}")
         }
+        utas.start()
+    }
 
-        /** Jejak tumpukan jadi satu baris: laporan kasir dipisah per kejadian. */
-        private fun jejak(e: Throwable): String =
-                    // Sengaja minim operasi string: pemanggilnya bisa jalan di stack
-                    // yang sudah nyaris penuh (thread jembatan WebView cuma ~1 MB) —
-                    // memotong nama kelas per bingkai pernah jadi pemantik
-                    // StackOverflowError kedua saat menyusun laporan gagal.
-                    e.javaClass.name + ": " + (e.message ?: "-") + " @" +
-                        e.stackTrace.take(3).joinToString(" < ") { it.methodName }
+    /** Jejak tumpukan jadi satu baris: laporan kasir dipisah per kejadian. */
+    private fun jejak(e: Throwable): String =
+        // Sengaja minim operasi string: pemanggilnya bisa jalan di stack
+        // yang sudah nyaris penuh (thread jembatan WebView cuma ~1 MB) —
+        // memotong nama kelas per bingkai pernah jadi pemantik
+        // StackOverflowError kedua saat menyusun laporan gagal.
+        e.javaClass.name + ": " + (e.message ?: "-") + " @" +
+            e.stackTrace.take(3).joinToString(" < ") { it.methodName }
 
     /** Panggil balik halaman dengan hasil cetak. Selalu di thread utama. */
     private fun laporCetak(ok: Boolean, pesan: String) {
@@ -476,6 +479,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
+        /**
+         * Ukuran stack thread cetak, dalam byte (8 MB). Bawaan ~1 MB pernah
+         * kurang untuk tumpukan panggilan Bluetooth Android yang dalam.
+         */
+        private const val TUMPUKAN_CETAK = 8L * 1024 * 1024
+
         /**
          * Alamat beranda. Datang dari build.gradle.kts, yang membacanya dari
          * alamat.json di akar proyek — satu sumber kebenaran untuk alamat,
