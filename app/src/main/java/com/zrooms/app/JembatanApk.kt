@@ -79,7 +79,14 @@ class JembatanApk(
             // hilang. Tangkap di sini agar pesan kasir-friendly sampai ke
             // halaman lewat ZXR_CETAK_HASIL.
             try {
-                this.cetak(naskah)
+                // `.invoke` WAJIB: property `cetak` (lambda di constructor) dan
+                // method `cetak(naskah)` ini bernama sama — `this.cetak(naskah)`
+                // resolve ke METHOD ini sendiri = rekursi tak terbatas =
+                // StackOverflowError di stack JavaBridge (~1 MB) SEBELUM thread
+                // kerja 8 MB sempat jalan. Produksi 1.0.23–1.0.27: "stack size
+                // 1039KB", tak pernah ada baris "mulai UTAS=", dan fix stack
+                // 8 MB + Handler.post tak mengubah gejala karena akarnya di sini.
+                cetak.invoke(naskah)
             } catch (e: PesanKesalahanPrinter) {
                 laporHasil(false, e.message ?: "Cetak gagal.")
             } catch (e: Throwable) {
