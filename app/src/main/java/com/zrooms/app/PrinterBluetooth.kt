@@ -108,8 +108,15 @@ object PrinterBluetooth {
     @SuppressLint("MissingPermission")
     fun mulaiPindai() {
         if (penerimaSiaran != null) return // sudah jalan
-        val adapter = adapter() ?: return
-        if (!izinDiberikan(konteksApl)) return
+        val adapter = adapter() ?: run {
+            LogWeb.catat(null, "bt-scan: perangkat tak punya Bluetooth"); return
+        }
+        if (!izinDiberikan(konteksApl)) {
+            LogWeb.catat(null, "bt-scan: izin Bluetooth belum diberikan"); return
+        }
+        if (!adapter.isEnabled) {
+            LogWeb.catat(null, "bt-scan: Bluetooth mati — nyalakan dulu"); return
+        }
         ditemukan.clear()
         val penerima = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) {
@@ -122,13 +129,19 @@ object PrinterBluetooth {
                         i.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
                     } ?: return
                 ditemukan[d.address] = d
+                LogWeb.catat(null, "bt-scan: ditemukan ${d.name ?: d.address}")
                 saatDitemukan?.let { runCatching { it() } }
             }
         }
         penerimaSiaran = penerima
         runCatching {
             konteksApl.registerReceiver(penerima, IntentFilter(BluetoothDevice.ACTION_FOUND))
-            adapter.startDiscovery()
+            val ok = adapter.startDiscovery()
+            if (!ok) {
+                LogWeb.catat(null, "bt-scan: startDiscovery() mengembalikan false — Bluetooth sibuk atau mati")
+            }
+        }.onFailure { e ->
+            LogWeb.catat(null, "bt-scan: gagal mulai: ${e.javaClass.simpleName}: ${e.message}")
         }
     }
 

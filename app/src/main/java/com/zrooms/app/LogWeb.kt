@@ -68,6 +68,18 @@ object LogWeb {
     @Volatile
     private var konteks: Context? = null
 
+    /**
+     * Halaman terakhir yang sudah siap. Referensi lemah: Activity/WebView boleh
+     * dihancurkan kapan saja, dan menahannya akan membocorkan seluruh Activity.
+     *
+     * Kenapa perlu: sebagian pencatat log (PrinterBluetooth, PemeriksaPembaruan)
+     * memanggil [catat] dengan `web = null` karena mereka tak memegang Activity.
+     * Sebelumnya pesan itu hanya masuk disk APK dan TAK PERNAH sampai ke
+     * penangkap log halaman — jadi log Bluetooth selalu hilang dari laporan.
+     */
+    @Volatile
+    private var webTerakhir: java.lang.ref.WeakReference<WebView>? = null
+
     /** Pesan terakhir & berapa kali berturut-turut — dasar peringkasan. */
     private var terakhir: String? = null
     private var ulangan = 0
@@ -112,7 +124,8 @@ object LogWeb {
      * dokumen yang belum ada akan hilang tanpa jejak.
      */
     fun sambungkan(web: WebView) {
-        web.evaluateJavascript(
+            webTerakhir = java.lang.ref.WeakReference(web)
+            web.evaluateJavascript(
             """
             (function () {
               if (window.__zxrApkTerpasang) return;
@@ -160,6 +173,11 @@ object LogWeb {
      */
     @Synchronized
     fun catat(web: WebView?, pesan: String) {
+        // Pemanggil tanpa Activity (PrinterBluetooth, PemeriksaPembaruan)
+        // mengirim null; halaman terakhir yang masih hidup dipakai supaya
+        // pesan sampai ke penangkap log web. get() null = Activity sudah
+        // dihancurkan — pesan tetap tersimpan di disk APK untuk nanti.
+        val target: WebView? = web ?: webTerakhir?.get()
         // Peringkasan pengulangan identik: yang dicatat cuma tiga yang pertama,
         // selebihnya jadi satu baris "… (N kali)". Lihat catatan MAKS_SAMA.
         if (pesan == terakhir) {
@@ -188,12 +206,12 @@ object LogWeb {
         while (baris.size > MAKS) baris.removeFirst()
         simpanKeDisk()
 
-        web?.post {
+        target?.post {
             // Dikirim lewat event supaya JS yang menerjemahkannya ke console.error,
             // bukan disisipkan ke string — pesan bisa memuat tanda kutip dan
             // baris baru yang kalau disisipkan langsung akan merusak skripnya.
             val aman = JSONObject.quote(pesan)
-            web.evaluateJavascript(
+            target.evaluateJavascript(
                 "window.dispatchEvent(new CustomEvent('zxr-apk-log',{detail:$aman}))",
                 null,
             )
