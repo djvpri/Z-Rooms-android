@@ -82,9 +82,9 @@ class JembatanApk(
                 this.cetak(naskah)
             } catch (e: PesanKesalahanPrinter) {
                 laporHasil(false, e.message ?: "Cetak gagal.")
-            } catch (e: Exception) {
-                laporHasil(false, "Cetak gagal: ${e.message ?: e.javaClass.simpleName}")
-                LogWeb.catat(null, "cetak: exception dari jembatan — ${e.javaClass.name}: ${e.message}")
+            } catch (e: Throwable) {
+                laporHasil(false, "Cetak gagal: ${e.javaClass.simpleName}: ${e.message ?: "-"}")
+                LogWeb.catat(null, "cetak: exception dari jembatan — ${e.javaClass.name}: ${e.message} | ${e.stackTrace.take(4).joinToString(" < ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }}")
             }
         }
 

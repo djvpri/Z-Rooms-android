@@ -306,19 +306,38 @@ class MainActivity : AppCompatActivity() {
 
     /** Kirim naskah ke printer di thread latar, lalu laporkan hasilnya ke halaman. */
     private fun kerjakanCetak(naskah: String) {
-        Thread {
-            try {
-                PrinterBluetooth.cetak(naskah)
-                laporCetak(true, "Nota terkirim ke printer.")
-            } catch (e: PesanKesalahanPrinter) {
-                // Pesannya sudah disusun untuk kasir — diteruskan apa adanya.
-                laporCetak(false, e.message ?: "Cetak gagal.")
-            } catch (e: Exception) {
-                // Termasuk OutOfMemory / SecurityException yang lolos.
-                laporCetak(false, "Cetak gagal: ${e.message ?: e.javaClass.simpleName}")
+            val utas = Thread {
+                try {
+                    PrinterBluetooth.cetak(naskah)
+                    laporCetak(true, "Nota terkirim ke printer.")
+                } catch (e: PesanKesalahanPrinter) {
+                    // Pesannya sudah disusun untuk kasir — diteruskan apa adanya.
+                    laporCetak(false, e.message ?: "Cetak gagal.")
+                } catch (e: Throwable) {
+                    // Throwable, bukan Exception: Error (NoClassDefFound,
+                    // OutOfMemoryError) tak ikut hierarki Exception. Jejak
+                    // tumpukan disertakan — pesan saja pernah tak cukup untuk
+                    // tahu baris mana yang gagal.
+                    laporCetak(false, "Cetak gagal: ${e.javaClass.simpleName}: ${e.message ?: "-"}")
+                    LogWeb.catat(null, "cetak: throwable — ${jejak(e)}")
+                }
             }
-        }.start()
-    }
+            // Penangkap terakhir: kalau pelaporan di atas sendiri melempar,
+            // Thread.UncaughtExceptionHandler default hanya mencetak ke logcat —
+            // yang tak pernah sampai ke laporan kasir.
+            utas.setUncaughtExceptionHandler { _, e ->
+                LogWeb.catat(null, "cetak: utas mati — ${jejak(e)}")
+                laporCetak(false, "Cetak gagal tak terduga: ${e.javaClass.simpleName}")
+            }
+            utas.start()
+        }
+
+        /** Jejak tumpukan jadi satu baris: laporan kasir dipisah per kejadian. */
+        private fun jejak(e: Throwable): String =
+            e.javaClass.name + ": " + (e.message ?: "-") + " | " +
+                e.stackTrace.take(6).joinToString(" < ") {
+                    "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}"
+                }
 
     /** Panggil balik halaman dengan hasil cetak. Selalu di thread utama. */
     private fun laporCetak(ok: Boolean, pesan: String) {
