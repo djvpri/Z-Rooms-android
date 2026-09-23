@@ -334,10 +334,12 @@ class MainActivity : AppCompatActivity() {
 
         /** Jejak tumpukan jadi satu baris: laporan kasir dipisah per kejadian. */
         private fun jejak(e: Throwable): String =
-            e.javaClass.name + ": " + (e.message ?: "-") + " | " +
-                e.stackTrace.take(6).joinToString(" < ") {
-                    "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}"
-                }
+                    // Sengaja minim operasi string: pemanggilnya bisa jalan di stack
+                    // yang sudah nyaris penuh (thread jembatan WebView cuma ~1 MB) —
+                    // memotong nama kelas per bingkai pernah jadi pemantik
+                    // StackOverflowError kedua saat menyusun laporan gagal.
+                    e.javaClass.name + ": " + (e.message ?: "-") + " @" +
+                        e.stackTrace.take(3).joinToString(" < ") { it.methodName }
 
     /** Panggil balik halaman dengan hasil cetak. Selalu di thread utama. */
     private fun laporCetak(ok: Boolean, pesan: String) {

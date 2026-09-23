@@ -84,7 +84,7 @@ class JembatanApk(
                 laporHasil(false, e.message ?: "Cetak gagal.")
             } catch (e: Throwable) {
                 laporHasil(false, "Cetak gagal: ${e.javaClass.simpleName}: ${e.message ?: "-"}")
-                LogWeb.catat(null, "cetak: exception dari jembatan — ${e.javaClass.name}: ${e.message} | ${e.stackTrace.take(4).joinToString(" < ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }}")
+                LogWeb.catat(null, "cetak: tx — ${e.javaClass.name}: ${e.message}")
             }
         }
 
