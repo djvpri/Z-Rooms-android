@@ -32,7 +32,7 @@ import androidx.core.content.ContextCompat
  * Sengaja TANPA Compose dan tanpa UI sendiri — seluruh tampilan datang dari
  * web. Yang ditambahkan di sini cuma yang browser tak bisa lakukan:
  * tombol kembali Android, unduhan bon, dan tempat menaruh printer Bluetooth
- * nanti (lihat [cetakStruk], masih kosong).
+ * nanti (lihat [cetakDiUtas]).
  */
 class MainActivity : AppCompatActivity() {
 
@@ -65,7 +65,7 @@ class MainActivity : AppCompatActivity() {
             // Kalau ditolak, PrinterBluetooth yang menyusun pesannya — satu
             // tempat, supaya kalimatnya sama dengan jalur izin-dicabut.
             if (hasil.values.all { it }) {
-                kerjakanCetak(naskah)
+                cetakDiUtas(naskah)
             } else {
                 laporCetak(false, "Izin Bluetooth ditolak. Cetak tak bisa jalan tanpa izin itu.")
             }
@@ -234,7 +234,7 @@ class MainActivity : AppCompatActivity() {
         // selain zomet.my.id — halaman luar tak pernah termuat di WebView
         // ini, jadi jembatan tak bisa dipanggil situs pihak ketiga.
         web.addJavascriptInterface(
-            JembatanApk(applicationContext) { naskah -> cetakStruk(naskah) },
+            JembatanApk(applicationContext) { naskah -> cetakDiUtas(naskah) },
             "ZXR_APK",
         )
 
@@ -284,37 +284,37 @@ class MainActivity : AppCompatActivity() {
      * selama itu — kasir melihat aplikasi menggantung, bukan tombol yang
      * bekerja. Karena itu seluruh urusannya dipindah ke thread lain.
      *
-     * Izin Bluetooth diminta DI SINI, bukan saat aplikasi dibuka: kasir yang
-     * tak punya printer tak perlu pernah melihat dialog izinnya.
+     * Izin Bluetooth diminta DI DALAM thread latar, bukan di thread pemanggil:
+     * rantai jembatan → cetakStruk → kerjakanCetak → Thread(...).start()
+     * pernah menumpuk di stack JavaBridge ~1 MB dan memicu
+     * StackOverflowError 1039KB SEBELUM thread latar sempat jalan.
+     *
+     * Stack 8 MB, bukan bawaan (~1 MB): tumpukan Bluetooth Android
+     * (createRfcommSocket → connect → write) cukup dalam.
      */
-    private fun cetakStruk(naskah: String) {
-        val izin = PrinterBluetooth.izinDibutuhkan()
-        val kurang = izin.filter {
-            checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED
-        }
-        if (kurang.isNotEmpty()) {
-            // Minta izin, lalu cetak yang tertunda setelah dijawab. Naskahnya
-            // disimpan: izin baru berlaku pada panggilan berikutnya, dan
-            // meminta kasir menekan tombol dua kali terasa seperti kerusakan.
-            naskahTertunda = naskah
-            LogWeb.catat(web, "izin Bluetooth diminta: ${kurang.joinToString(",")}")
-            mintaIzinBluetooth.launch(kurang.toTypedArray())
-            return
-        }
-        kerjakanCetak(naskah)
-    }
-
-    /** Kirim naskah ke printer di thread latar, lalu laporkan hasilnya ke halaman. */
-    private fun kerjakanCetak(naskah: String) {
-        // Stack 8 MB, bukan bawaan (~1 MB): tumpukan Bluetooth Android
-        // (createRfcommSocket → connect → write) cukup dalam sampai pernah
-        // memicu StackOverflowError 1039KB pada thread bawaan.
+    private fun cetakDiUtas(naskah: String) {
         val utas = Thread(null, {
             // Instrumentasi: nama thread dicatat agar ketahuan apakah tumpukan
             // yang jebol itu thread kerja 8 MB atau thread lain (JavaBridge
             // WebView, stack bawaan ~1 MB — angka 1039KB di laporan SOE).
             LogWeb.catat(null, "cetak: mulai UTAS=${Thread.currentThread().name} STACK=${TUMPUKAN_CETAK}")
             try {
+                val kurang = PrinterBluetooth.izinDibutuhkan().filter {
+                    checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                }
+                if (kurang.isNotEmpty()) {
+                    // Minta izin, lalu cetak yang tertunda setelah dijawab.
+                    // Naskahnya disimpan: izin baru berlaku pada panggilan
+                    // berikutnya, dan meminta kasir menekan tombol dua kali
+                    // terasa seperti kerusakan.
+                    // Dialog izin wajib naik di thread utama.
+                    naskahTertunda = naskah
+                    runOnUiThread {
+                        LogWeb.catat(web, "izin Bluetooth diminta: ${kurang.joinToString(",")}")
+                        mintaIzinBluetooth.launch(kurang.toTypedArray())
+                    }
+                    return@Thread
+                }
                 PrinterBluetooth.cetak(naskah)
                 laporCetak(true, "Nota terkirim ke printer.")
             } catch (e: PesanKesalahanPrinter) {
