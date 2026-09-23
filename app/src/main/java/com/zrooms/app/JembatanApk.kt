@@ -68,13 +68,25 @@ class JembatanApk(
      * tak mengirim teks raksasa yang menghabiskan memori.
      */
     @JavascriptInterface
-    fun cetak(naskah: String) {
-        if (naskah.length > MAKS_NASKAH) {
-            laporHasil(false, "Naskah nota terlalu panjang (${naskah.length} karakter).")
-            return
+        fun cetak(naskah: String) {
+            if (naskah.length > MAKS_NASKAH) {
+                laporHasil(false, "Naskah nota terlalu panjang (${naskah.length} karakter).")
+                return
+            }
+            // Bungkus callback cetakStruk: exception yang sampai ke luar
+            // @JavascriptInterface ditangkap WebView sebagai "Error invoking
+            // cetak" — pesan asli (mis. "Belum ada printer yang dipasangkan")
+            // hilang. Tangkap di sini agar pesan kasir-friendly sampai ke
+            // halaman lewat ZXR_CETAK_HASIL.
+            try {
+                this.cetak(naskah)
+            } catch (e: PesanKesalahanPrinter) {
+                laporHasil(false, e.message ?: "Cetak gagal.")
+            } catch (e: Exception) {
+                laporHasil(false, "Cetak gagal: ${e.message ?: e.javaClass.simpleName}")
+                LogWeb.catat(null, "cetak: exception dari jembatan — ${e.javaClass.name}: ${e.message}")
+            }
         }
-        this.cetak(naskah)
-    }
 
     /**
      * Daftar printer yang sudah dipasangkan ke perangkat, dipisah baris baru.
