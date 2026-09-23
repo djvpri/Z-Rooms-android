@@ -310,6 +310,10 @@ class MainActivity : AppCompatActivity() {
         // (createRfcommSocket → connect → write) cukup dalam sampai pernah
         // memicu StackOverflowError 1039KB pada thread bawaan.
         val utas = Thread(null, {
+            // Instrumentasi: nama thread dicatat agar ketahuan apakah tumpukan
+            // yang jebol itu thread kerja 8 MB atau thread lain (JavaBridge
+            // WebView, stack bawaan ~1 MB — angka 1039KB di laporan SOE).
+            LogWeb.catat(null, "cetak: mulai UTAS=${Thread.currentThread().name} STACK=${TUMPUKAN_CETAK}")
             try {
                 PrinterBluetooth.cetak(naskah)
                 laporCetak(true, "Nota terkirim ke printer.")
@@ -335,18 +339,29 @@ class MainActivity : AppCompatActivity() {
         utas.start()
     }
 
-    /** Jejak tumpukan jadi satu baris: laporan kasir dipisah per kejadian. */
-    private fun jejak(e: Throwable): String =
-        // Sengaja minim operasi string: pemanggilnya bisa jalan di stack
-        // yang sudah nyaris penuh (thread jembatan WebView cuma ~1 MB) —
-        // memotong nama kelas per bingkai pernah jadi pemantik
-        // StackOverflowError kedua saat menyusun laporan gagal.
-        e.javaClass.name + ": " + (e.message ?: "-") + " @" +
-            e.stackTrace.take(3).joinToString(" < ") { it.methodName }
+    /**
+         * Jejak tumpukan jadi satu baris: laporan kasir dipisah per kejadian.
+         *
+         * Instrumentasi: 8 bingkai pertama dengan className utuh (tanpa
+         * pemotongan nama kelas per bingkai — substringAfterLast pernah
+         * memantik StackOverflowError kedua di thread jembatan ~1 MB).
+         * Format: "class.method:line < class.method:line < ..."
+         */
+        private fun jejak(e: Throwable): String =
+            e.javaClass.name + ": " + (e.message ?: "-") + " @[" +
+                Thread.currentThread().name + "] " +
+                e.stackTrace.take(8).joinToString(" < ") {
+                    it.className + "." + it.methodName + ":" + it.lineNumber
+                }
 
     /** Panggil balik halaman dengan hasil cetak. Selalu di thread utama. */
     private fun laporCetak(ok: Boolean, pesan: String) {
-        LogWeb.catat(web, "cetak ${if (ok) "berhasil" else "gagal"}: $pesan")
+        // Instrumentasi: nama thread ikut tercatat — 4 laporan identik dalam
+        // 9 ms belum jelas asalnya dari thread kerja atau dari pemantau status.
+        LogWeb.catat(
+            web,
+            "cetak ${if (ok) "berhasil" else "gagal"}: $pesan [UTAS=${Thread.currentThread().name}]"
+        )
         jalankanJs(JembatanApk.hasilCetakJs(ok, pesan))
     }
 
