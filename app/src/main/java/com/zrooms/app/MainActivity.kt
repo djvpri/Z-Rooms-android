@@ -285,20 +285,30 @@ class MainActivity : AppCompatActivity() {
      * bekerja. Karena itu seluruh urusannya dipindah ke thread lain.
      *
      * Izin Bluetooth diminta DI DALAM thread latar, bukan di thread pemanggil:
-     * rantai jembatan → cetakStruk → kerjakanCetak → Thread(...).start()
-     * pernah menumpuk di stack JavaBridge ~1 MB dan memicu
-     * StackOverflowError 1039KB SEBELUM thread latar sempat jalan.
+     * thread kerja dibuat lewat Handler.post ke main looper — dulu dibuat
+     * langsung di stack JavaBridge ~1 MB dan memicu StackOverflowError
+     * 1039KB SEBELUM thread latar sempat jalan (UTAS=0 di laporan).
      *
      * Stack 8 MB, bukan bawaan (~1 MB): tumpukan Bluetooth Android
      * (createRfcommSocket → connect → write) cukup dalam.
      */
     private fun cetakDiUtas(naskah: String) {
-        val utas = Thread(null, {
-            // Instrumentasi: nama thread dicatat agar ketahuan apakah tumpukan
-            // yang jebol itu thread kerja 8 MB atau thread lain (JavaBridge
-            // WebView, stack bawaan ~1 MB — angka 1039KB di laporan SOE).
-            LogWeb.catat(null, "cetak: mulai UTAS=${Thread.currentThread().name} STACK=${TUMPUKAN_CETAK}")
-            try {
+            // Thread kerja DIBUAT DI MAIN LOOPER, bukan langsung di sini.
+            // Pemanggilnya adalah thread JavaBridge WebView: stack-nya sudah
+            // dalam (mesin JS + frame Chromium) saat callback jembatan jalan,
+            // dan membuat Thread di sana pernah memicu StackOverflowError
+            // SEBELUM thread kerja sempat mengeksekusi baris pertamanya —
+            // terbukti dari UTAS=0 di laporan: thread 8 MB tak pernah jalan.
+            // `post` memotong rantai itu: badan lambda dieksekusi dari message
+            // loop utama, stack dangkal, dan pembuatan thread hanya menumpuk
+            // beberapa bingkai.
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+            val utas = Thread(null, {
+                // Instrumentasi: nama thread dicatat agar ketahuan apakah
+                // tumpukan yang jebol itu thread kerja 8 MB atau thread lain
+                // (JavaBridge WebView, stack bawaan ~1 MB — angka 1039KB).
+                LogWeb.catat(null, "cetak: mulai UTAS=${Thread.currentThread().name} STACK=${TUMPUKAN_CETAK}")
+                try {
                 val kurang = PrinterBluetooth.izinDibutuhkan().filter {
                     checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED
                 }
@@ -337,6 +347,7 @@ class MainActivity : AppCompatActivity() {
             laporCetak(false, "Cetak gagal tak terduga: ${e.javaClass.simpleName}")
         }
         utas.start()
+        }
     }
 
     /**
