@@ -1,16 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Layer-list splash: latar teal penuh + lambang pintu di tengah. Dipakai
      sebagai windowBackground tema, jadi tampil INSTAN sebelum WebView siap —
-     bukan layar putih kosong. Sengaja bukan <bitmap> berpusat manual:
-     layer-list dengan gravity center cukup dan tak butuh PNG. -->
+     bukan layar putih kosong.
+
+     BENTUK BAKU: lambang ditulis sebagai <item android:drawable="..."> —
+     atribut yang MEMANG dimiliki <item> (layer-list). Versi sebelumnya
+     menaruh android:drawable pada tag <vector> di dalam <item>, bentuk yang
+     tidak dikenal inflater drawable dan sempat dicurigai memicu crash saat
+     windowBackground di-inflate (sebelum onCreate — tak tertangkap penangkap
+     crash, tak ada laporan, app langsung tertutup).
+
+     Inset 16% tiap sisi → lambang ~68dp di tengah, mirip ikon launcher.
+     android:inset pada <item> butuh API 23; minSdk 24 → aman. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="@color/splash_latar" />
-    <item android:gravity="center">
-        <vector
-            android:width="96dp"
-            android:height="96dp"
-            android:viewportWidth="108"
-            android:viewportHeight="108"
-            android:drawable="@drawable/ikon_depan" />
-    </item>
+    <item
+        android:drawable="@drawable/ikon_depan"
+        android:gravity="center"
+        android:insetLeft="16%"
+        android:insetRight="16%"
+        android:insetTop="16%"
+        android:insetBottom="16%" />
 </layer-list>
