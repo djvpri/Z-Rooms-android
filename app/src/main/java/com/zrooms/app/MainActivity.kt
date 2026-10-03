@@ -13,6 +13,7 @@ import android.os.Environment
 import android.view.View
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
+import android.webkit.WebSettings
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -119,6 +120,14 @@ class MainActivity : AppCompatActivity() {
             builtInZoomControls = true
             displayZoomControls = false
             mediaPlaybackRequiresUserGesture = false
+            // Cache: aset statis (_next/static: JS/CSS/font ikon) tak berubah
+            // antar rilis situs dan ber-hash di URL-nya — disimpan di cache HTTP
+            // WebView sehingga buka kedua dsb. jauh lebih cepat. LOAD_DEFAULT =
+            // pakai cache bila masih berlaku, unduh ulang bila kedaluwarsa.
+            cacheMode = WebSettings.LOAD_DEFAULT
+            // Render putus-putus saat scroll jadi halus; ambang batas standar
+            // WebView sering bikin teks berkedip putih di perangkat kelas kasir.
+            setRenderPriority(WebSettings.RenderPriority.HIGH)
             // Situs memblokir agen tak dikenal; tempelkan penanda versi kita
             // supaya sisi web bisa membedakan asal permintaan bila perlu.
             // Versi asli (bukan "1.0" tetap) supaya log di sisi web tahu APK

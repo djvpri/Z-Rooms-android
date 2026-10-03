@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Layer-list splash: latar teal penuh + lambang pintu di tengah. Dipakai
+     sebagai windowBackground tema, jadi tampil INSTAN sebelum WebView siap —
+     bukan layar putih kosong. Sengaja bukan <bitmap> berpusat manual:
+     layer-list dengan gravity center cukup dan tak butuh PNG. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/splash_latar" />
+    <item android:gravity="center">
+        <vector
+            android:width="96dp"
+            android:height="96dp"
+            android:viewportWidth="108"
+            android:viewportHeight="108"
+            android:drawable="@drawable/ikon_depan" />
+    </item>
+</layer-list>

@@ -10,6 +10,8 @@
         <item name="android:statusBarColor">#0F766E</item>
         <item name="colorPrimary">#0F766E</item>
         <item name="colorPrimaryDark">#0F766E</item>
-        <item name="android:windowBackground">#FFFFFF</item>
+        <!-- Splash: lambang pintu di latar teal, tampil instan saat proses
+             dingin — bukan layar putih. Diganti WebView begitu halaman siap. -->
+        <item name="android:windowBackground">@drawable/splash</item>
     </style>
 </resources>
