@@ -200,9 +200,9 @@ class PemilihBerkas(
     private fun bukaKamera(callback: ValueCallback<Array<Uri>>) {
         if (kameraJalan) {
             catat("kamera sebelumnya masih terbuka — permintaan lama dibatalkan")
-            // Jangan biarkan callback baru menggantung:WebView menunggu balasan
+            // Jangan biarkan callback baru menggantung: WebView menunggu balasan
             // dan semua tombol berkas lain ikut mati sampai dibalas.
-            cb.onReceiveValue(null)
+            callback.onReceiveValue(null)
             return
         }
         val tujuan = try {
