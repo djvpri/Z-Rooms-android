@@ -219,6 +219,23 @@ class PemilihBerkas(
             // Aplikasi kamera harus boleh MENULIS ke URI ini.
             .addFlags(android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            // Kamera OEM (Transsion/itel dkk) kerap mengabaikan grant lewat
+            // flags saja: ia gagal membaca URI, mundur ke jalur simpan sendiri
+            // di penyimpanan eksternal, lalu error "izin ditolak — tidak dapat
+            // menulis penyimpanan eksternal". ClipData menyalin URI + grant ke
+            // tumpukan aktivitas — cara baku yang selalu sampai (kasus
+            // produksi 2026-10-03, itel S685LN Android 15).
+            .setClipData(android.content.ClipData.newRawUri(null, tujuan))
+
+        // Beri grant langsung ke tiap paket kamera, di luar mekanisme Intent:
+        // sebagian kamera OEM membaca berkas lewat jalur yang tak dibawa flags.
+        for (res in activity.packageManager.queryIntentActivities(intent, 0)) {
+            activity.grantUriPermission(
+                res.activityInfo.packageName, tujuan,
+                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+        }
 
         if (intent.resolveActivity(activity.packageManager) == null) {
             // Sejak Android 11 pencarian begini cuma melihat aplikasi yang
