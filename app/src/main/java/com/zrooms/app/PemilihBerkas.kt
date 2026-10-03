@@ -66,6 +66,28 @@ class PemilihBerkas(
             menunggu = null
             val tujuan = tujuanKamera
             tujuanKamera = null
+            // Aktivitas kamera/pemilih sudah ditutup — apa pun hasilnya, tanda
+            // "kamera masih jalan" wajib dilepas. Dulu tidak: sekali kamera
+            // ditutup, kameraJalan tetap true dan klik berikutnya diabaikan
+            // diam-diam, sementara callback yang baru mendaftar menggantung dan
+            // memblokir SEMUA pemilih berkas sampai aplikasi ditutup (kasus
+            // produksi 2026-10-03: klik kedua Kamera dan Pilih File mati total).
+            kameraJalan = false
+
+            // Kamera dengan EXTRA_OUTPUT kerap membalas RESULT_OK tanpa data
+            // (fotonya sudah ditulis ke URI milik kita). Jalur kamera dicek
+            // lebih dulu; `data == null` hanya berarti batal bagi pemilih
+            // berkas biasa.
+            if (tujuan != null && cb != null) {
+                if (hasil.resultCode == Activity.RESULT_OK) {
+                    catat("kamera selesai: foto tersimpan di ${tujuan.path}")
+                    cb.onReceiveValue(arrayOf(tujuan))
+                } else {
+                    catat("kamera dibatalkan kasir (kode=${hasil.resultCode})")
+                    cb.onReceiveValue(null)
+                }
+                return@registerForActivityResult
+            }
 
             // `data == null` saat kasir MENUTUP kamera tanpa memotret. Dulu
             // jalur ini mengantar `parseResult` ke Intent kosong, padahal yang
@@ -73,15 +95,6 @@ class PemilihBerkas(
             if (hasil.resultCode != Activity.RESULT_OK || hasil.data == null) {
                 catat("pemilih selesai: DIBATALKAN (kode=${hasil.resultCode})")
                 cb?.onReceiveValue(null)
-                return@registerForActivityResult
-            }
-
-            // Kamera: hasilnya TIDAK dikirim lewat extras (dan sejak Android 11
-            // extras dari aplikasi lain memang tak bisa dipercaya). Fotonya
-            // sudah ditulis sendiri ke URI yang kita minta di [siapkanKamera].
-            if (tujuan != null && cb != null) {
-                catat("kamera selesai: foto tersimpan di ${tujuan.path}")
-                cb.onReceiveValue(arrayOf(tujuan))
                 return@registerForActivityResult
             }
 
@@ -186,7 +199,10 @@ class PemilihBerkas(
      */
     private fun bukaKamera(callback: ValueCallback<Array<Uri>>) {
         if (kameraJalan) {
-            catat("kamera sebelumnya masih terbuka — permintaan diabaikan")
+            catat("kamera sebelumnya masih terbuka — permintaan lama dibatalkan")
+            // Jangan biarkan callback baru menggantung:WebView menunggu balasan
+            // dan semua tombol berkas lain ikut mati sampai dibalas.
+            cb.onReceiveValue(null)
             return
         }
         val tujuan = try {
