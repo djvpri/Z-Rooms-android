@@ -85,8 +85,19 @@ blok('foto kamera ditulis ke content:// milik sendiri', () => {
     'URI file:// ditolak sejak Android 7 (FileUriExposedException) — wajib FileProvider')
   assert.match(berkas, /FLAG_GRANT_WRITE_URI_PERMISSION/,
     'tanpa FLAG_GRANT_WRITE_URI_PERMISSION aplikasi kamera tak boleh menulis fotonya')
-  assert.match(berkas, /resolveActivity\(/,
-    'tanpa resolveActivity, ketiadaan kamera muncul sebagai crash, bukan pesan')
+  // Deteksi ketiadaan kamera kini lewat daftar eksplisit queryIntentActivities
+  // (resolveActivity butuh <queries> ketat dan balik null pada kamera OEM —
+  // fix 2026-10-03). Setara fungsional: daftar kosong = tak ada kamera.
+  assert.match(berkas, /queryIntentActivities\(intent, 0\)/,
+    'tanpa queryIntentActivities, ketiadaan kamera muncul sebagai crash, bukan pesan')
+  assert.match(berkas, /kameraTersedia\.isEmpty\(\)/,
+    'penjaga daftar kamera kosong hilang — klik di perangkat tanpa kamera crash tanpa pesan')
+  // Kamera OEM (itel/Transsion) mengabaikan grant via flags saja: perlu
+  // ClipData + grantUriPermission eksplisit, bukan cuma addFlags.
+  assert.match(berkas, /setClipData\(|clipData =/,
+    'tanpa ClipData, kamera OEM gagal menulis foto (izin ditolak penyimpanan eksternal)')
+  assert.match(berkas, /grantUriPermission\(/,
+    'tanpa grantUriPermission eksplisit, sebagian kamera OEM tak kebagian akses URI')
 })
 blok('isCaptureEnabled dijaga versi (minSdk 24, API-nya 30)', () => {
   // Pencocokan literal, bukan regex: `Build.VERSION.CODES.R` ditulis apa
