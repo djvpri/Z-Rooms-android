@@ -13,10 +13,11 @@ import android.os.Environment
 import android.view.View
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
-import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.ProgressBar
@@ -159,6 +160,42 @@ class MainActivity : AppCompatActivity() {
                     startActivity(Intent(Intent.ACTION_VIEW, request.url))
                     true
                 }
+            }
+
+            /**
+             * Jaringan mati / server tak terjangkau saat membuka halaman:
+             * alihkan ke /offline — halaman mode offline bawaan situs, yang
+             * merender data terakhir (snapshot localStorage) dan menerima
+             * transaksi ke outbox. Tanpa ini kasir mendapat layar netError
+             * putih dan tak bisa bekerja sama sekali.
+             *
+             * Hanya kegagalan MUAT HALAMAN UTAMA (isForMainFrame) yang
+             * dialihkan; gagal muat gambar/API di halaman yang sudah terbuka
+             * dibiarkan — halaman web punya penanganannya sendiri.
+             *
+             * ERROR_HOST_LOOKUP = DNS mati (wifi ada tapi tanpa internet),
+             * ERROR_CONNECT/ERROR_TIMEOUT = server tak terjangkau. Daftar
+             * ini yang benar-benar dialami kasir; error SSL dsb. tetap
+             * ditampilkan apa adanya (mengalihkan masalah sertifikat ke
+             * halaman offline justru menyembunyikannya).
+             */
+            override fun onReceivedError(
+                view: WebView,
+                request: WebResourceRequest,
+                error: WebResourceError,
+            ) {
+                super.onReceivedError(request, error)
+                if (!request.isForMainFrame) return
+                val kode = error.errorCode
+                val jaringan = kode == WebViewClient.ERROR_HOST_LOOKUP ||
+                    kode == WebViewClient.ERROR_CONNECT ||
+                    kode == WebViewClient.ERROR_TIMEOUT ||
+                    kode == WebViewClient.ERROR_UNKNOWN
+                LogWeb.catat(
+                    view,
+                    "muat gagal (main frame): kode=$kode ${error.description} → ${if (jaringan) "/offline" else "tampil error"}",
+                )
+                if (jaringan) view.loadUrl("$BERANDA/offline")
             }
 
             // Penangkap log sisi APK disambungkan setelah halaman siap: skrip
