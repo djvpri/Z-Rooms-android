@@ -80,7 +80,25 @@ class PemilihBerkas(
             // berkas biasa.
             if (tujuan != null && cb != null) {
                 if (hasil.resultCode == Activity.RESULT_OK) {
-                    catat("kamera selesai: foto tersimpan di ${tujuan.path}")
+                    // Verifikasi nyata: kamera bisa membalas RESULT_OK padahal
+                    // fotonya gagal ditulis ke URI kita (fallback simpan ke
+                    // penyimpanan eksternalnya sendiri — sumber error "izin
+                    // ditolak tidak dapat menulis penyimpanan eksternal").
+                    // Ukuran berkas memberi tahu alasan sesungguhnya.
+                    val berkas = tujuan.path?.let { File(it) }
+                    val ukuran = berkas?.takeIf { it.exists() }?.length() ?: -1L
+                    if (ukuran <= 0L) {
+                        catat(
+                            "KAMERA GAGAL TULIS FOTO: RESULT_OK tapi berkas tak ada/0 byte " +
+                                "(path=${tujuan.path}, ada=${berkas?.exists()}, ukuran=$ukuran). " +
+                                "Kemungkinan grant URI tak sampai ke kamera — kamera menulis " +
+                                "ke penyimpanannya sendiri dan gagal (error 'izin ditolak " +
+                                "penyimpanan eksternal'). Cek baris 'kamera terdeteksi' di atas."
+                        )
+                        batal("Kamera gagal menyimpan foto. Coba lagi, atau pilih dari galeri.")
+                        return@registerForActivityResult
+                    }
+                    catat("kamera selesai: foto tersimpan di ${tujuan.path} ($ukuran byte)")
                     cb.onReceiveValue(arrayOf(tujuan))
                 } else {
                     catat("kamera dibatalkan kasir (kode=${hasil.resultCode})")
@@ -259,6 +277,22 @@ class PemilihBerkas(
             batal("Tidak ada aplikasi kamera di perangkat ini.")
             return
         }
+        // DIAGNOSTIK "izin ditolak — tidak dapat menulis penyimpanan eksternal":
+        // kalau grant URI kita tak sampai ke proses kamera, kamera OEM mundur
+        // menyimpan ke penyimpanan eksternalnya sendiri (butuh WRITE_EXTERNAL_
+        // STORAGE / MANAGE_EXTERNAL_STORAGE) dan ditolak di sana. Catat paket +
+        // status grant per-uid tiap kamera supaya log kasir menunjukkan
+        // siapa yang kebagian dan siapa yang tidak.
+        val daftarKamera = kameraTersedia.joinToString(", ") { res ->
+            val pkg = res.activityInfo.packageName
+            val uid = res.activityInfo.applicationInfo.uid
+            val granted = activity.checkUriPermission(
+                tujuan, -1, uid,
+                android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            "$pkg(uid=$uid,grant=${if (granted) "OK" else "TAK_TERBACA"})"
+        }
+        catat("kamera terdeteksi: $daftarKamera")
         kameraJalan = true
         try {
             pilih.launch(intent)
