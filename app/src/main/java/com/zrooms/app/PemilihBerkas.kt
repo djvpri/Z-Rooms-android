@@ -229,7 +229,11 @@ class PemilihBerkas(
 
         // Beri grant langsung ke tiap paket kamera, di luar mekanisme Intent:
         // sebagian kamera OEM membaca berkas lewat jalur yang tak dibawa flags.
-        for (res in activity.packageManager.queryIntentActivities(intent, 0)) {
+        // queryIntentActivities: MATCH_DEFAULT_ONLY saja kurang — pakai 0 agar
+        // semua kamera terpasang (bisa diintent-filter-nya bukan DEFAULT) ikut
+        // kebagian grant.
+        val kameraTersedia = activity.packageManager.queryIntentActivities(intent, 0)
+        for (res in kameraTersedia) {
             activity.grantUriPermission(
                 res.activityInfo.packageName, tujuan,
                 android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
@@ -237,9 +241,11 @@ class PemilihBerkas(
             )
         }
 
-        if (intent.resolveActivity(activity.packageManager) == null) {
-            // Sejak Android 11 pencarian begini cuma melihat aplikasi yang
-            // terlihat; ketiadaan hasil berarti memang tak ada kamera terpasang.
+        if (kameraTersedia.isEmpty()) {
+            // Daftar kamera diambil dari queryIntentActivities di atas
+            // (sejak Android 11, resolveActivity butuh <queries> di manifes
+            // dan kerap balik null pada kamera OEM — daftar eksplisit lebih
+            // dapat diandalkan).
             catat("tak ada aplikasi kamera")
             batal("Tidak ada aplikasi kamera di perangkat ini.")
             return
