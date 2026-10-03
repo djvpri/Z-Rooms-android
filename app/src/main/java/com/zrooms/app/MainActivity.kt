@@ -184,7 +184,7 @@ class MainActivity : AppCompatActivity() {
                 request: WebResourceRequest,
                 error: WebResourceError,
             ) {
-                super.onReceivedError(request, error)
+                super.onReceivedError(view, request, error)
                 if (!request.isForMainFrame) return
                 val kode = error.errorCode
                 val jaringan = kode == WebViewClient.ERROR_HOST_LOOKUP ||
