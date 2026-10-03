@@ -214,28 +214,37 @@ class PemilihBerkas(
             return
         }
         tujuanKamera = tujuan
+        // Disusun per-baris, bukan chain: stub setter tertentu di android.jar
+        // membuat seluruh chain ter-infer Unit (kompilasi 2026-10-03: "inferred
+        // type is Unit but Intent! was expected" mematikan dua pemakaian
+        // `intent` di bawahnya).
         val intent = android.content.Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE)
-            .putExtra(android.provider.MediaStore.EXTRA_OUTPUT, tujuan)
-            // Aplikasi kamera harus boleh MENULIS ke URI ini.
-            .addFlags(android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-            .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            // Kamera OEM (Transsion/itel dkk) kerap mengabaikan grant lewat
-            // flags saja: ia gagal membaca URI, mundur ke jalur simpan sendiri
-            // di penyimpanan eksternal, lalu error "izin ditolak — tidak dapat
-            // menulis penyimpanan eksternal". ClipData menyalin URI + grant ke
-            // tumpukan aktivitas — cara baku yang selalu sampai (kasus
-            // produksi 2026-10-03, itel S685LN Android 15).
-            .setClipData(android.content.ClipData.newRawUri(null, tujuan))
+        intent.putExtra(android.provider.MediaStore.EXTRA_OUTPUT, tujuan)
+        // Aplikasi kamera harus boleh MENULIS ke URI ini.
+        intent.addFlags(android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        intent.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        // Kamera OEM (Transsion/itel dkk) kerap mengabaikan grant lewat flags
+        // saja: ia gagal membaca URI, mundur ke jalur simpan sendiri di
+        // penyimpanan eksternal, lalu error "izin ditolak — tidak dapat
+        // menulis penyimpanan eksternal". ClipData menyalin URI + grant ke
+        // tumpukan aktivitas — cara baku yang selalu sampai (kasus produksi
+        // 2026-10-03, itel S685LN Android 15).
+        intent.clipData = android.content.ClipData.newRawUri("ktp", tujuan)
 
         // Beri grant langsung ke tiap paket kamera, di luar mekanisme Intent:
         // sebagian kamera OEM membaca berkas lewat jalur yang tak dibawa flags.
         // queryIntentActivities: MATCH_DEFAULT_ONLY saja kurang — pakai 0 agar
         // semua kamera terpasang (bisa diintent-filter-nya bukan DEFAULT) ikut
         // kebagian grant.
-        val kameraTersedia = activity.packageManager.queryIntentActivities(intent, 0)
+        // ResolveInfoFlags baru Android 13; overload Int sudah didepresiasi di
+        // 33 tapi tetap ada — minSdk 24 menuntutnya. Panggilan berdaftar 2
+        // argumen (bukan named/unamed campur) supaya stub mana pun cocok.
+        val kameraTersedia: List<android.content.pm.ResolveInfo> =
+            activity.packageManager.queryIntentActivities(intent, 0)
         for (res in kameraTersedia) {
             activity.grantUriPermission(
-                res.activityInfo.packageName, tujuan,
+                res.activityInfo.packageName,
+                tujuan,
                 android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
                     android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
             )
