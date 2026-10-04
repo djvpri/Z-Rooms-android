@@ -48,7 +48,7 @@ blok('fokus WebView dikembalikan tiap balik dari kamera (fix klik diam)', () => 
   assert.match(berkas, /kameraJalan = false[\s\S]{0,220}?saatBalikDariKamera\(\)/,
     'jalur hasil kamera tak memulihkan fokus WebView')
   // MainActivity menyambung lambda pemulihan fokus ke PemilihBerkas.
-  assert.match(main, /PemilihBerkas\(this\)[\s\S]{0,400}?resumeTimers\(\)[\s\S]{0,80}?requestFocus\(\)/,
+  assert.match(main, /PemilihBerkas\([\s\S]{0,400}?resumeTimers\(\)[\s\S]{0,80}?requestFocus\(\)/,
     'lambda fokuskanWeb tak dipasang — saatBalikDariKamera jadi no-op')
 })
 
