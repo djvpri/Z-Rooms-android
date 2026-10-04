@@ -222,13 +222,12 @@ class MainActivity : AppCompatActivity() {
                 if (url.startsWith(BERANDA)) {
                     autoSambungPrinter()
                 }
-                // Kejadian selama pemuatan (saat halaman belum siap) dikirim
-                // menyusul, supaya tak hilang.
-                //
-                // `catat` di sini memang menyalin isi yang sudah tercatat: yang
-                // dituju sisi WEB, karena pengirim laporan ada di halaman web.
-                val tertunda = LogWeb.isi()
-                if (tertunda.isNotEmpty()) LogWeb.catat(view, "log APK saat pemuatan:\n$tertunda")
+                // Kejadian selama pemuatan TIDAK disalin ulang ke buffer di sini
+                // lagi: dulu isi() → catat() memasukkan snapshot ke buffer,
+                // snapshot berikutnya membawa snapshot sebelumnya — log APK di
+                // laporan jadi bersarang duplikat (produksi 1.0.38). Log sisi
+                // APK kini selalu terbaca lewat jembatan ZXR_APK.isiLog() saat
+                // laporan disusun, jadi jalur itu saja cukup.
                 // Versi APK yang menjalankan halaman ini. Ditulis di sini (bukan
                 // di onCreate) supaya ikut terkirim lewat tombol "Kirim log
                 // error": laporan web hanya tahu versi webnya.

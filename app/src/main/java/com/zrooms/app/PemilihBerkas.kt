@@ -39,6 +39,22 @@ class PemilihBerkas(
     private val fokuskanWeb: () -> Unit,
 ) {
 
+    companion object {
+        /**
+         * Foto KTP terakhir, terkompresi lalu di-base64-kan.
+         *
+         * Dijembatani ke halaman web lewat [JembatanApk.fotoKtp] — BUKAN lewat
+         * `<input type=file>`: pembacaan berkas oleh WebView di beberapa
+         * perangkat (itel S685LN, Android 15) SELALU menghasilkan File 0 byte
+         * di tiga jalur berbeda (FileProvider cache-dir, MediaStore, dan
+         * FileProvider ktp.jpg; produksi 2026-10-03 s.d. 04). APK sendiri selalu
+         * bisa membacanya dengan benar via ContentResolver — jadi fotonya
+         * disalin ke memori sini, dan halaman mengambilnya lewat jembatan.
+         */
+        @Volatile
+        var fotoKtpBase64: String? = null
+    }
+
     /** Permintaan yang sedang menunggu. Lihat catatan [batal]. */
     private var menunggu: ValueCallback<Array<Uri>>? = null
 
@@ -124,6 +140,26 @@ class PemilihBerkas(
                         return@registerForActivityResult
                     }
                     bersihkanTargetKamera(tujuan)
+                    // Simpan salinan terkompresi untuk jembatan fotoKtp() —
+                    // jalur utama ke web; lihat [fotoKtpBase64]. Gagal kompres
+                    // tak membatalkan deliver: fallback input file masih jalan.
+                    try {
+                        val bitmap = android.graphics.BitmapFactory.decodeFile(berkasKtp.absolutePath)
+                        if (bitmap != null) {
+                            val keluaran = java.io.ByteArrayOutputStream()
+                            bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, keluaran)
+                            bitmap.recycle()
+                            if (keluaran.size() > 0) {
+                                fotoKtpBase64 = android.util.Base64.encodeToString(
+                                    keluaran.toByteArray(), android.util.Base64.NO_WRAP)
+                                catat("kamera: salinan jembatan siap (${fotoKtpBase64!!.length} b64)")
+                            }
+                        } else {
+                            catat("kamera: kompres jembatan gagal (bukan bitmap)")
+                        }
+                    } catch (e: Exception) {
+                        catat("kamera: kompres jembatan GAGAL: ${e.javaClass.simpleName}: ${e.message}")
+                    }
                     // Balas URI berkas internal (content:// FileProvider) ke web:
                     // WebView/mesin cetak hanya butuh URI yang bisa dibaca lokal.
                     val uriKtp = FileProvider.getUriForFile(activity, "${activity.packageName}.berkas",

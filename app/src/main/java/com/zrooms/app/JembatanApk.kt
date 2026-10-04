@@ -53,6 +53,17 @@ class JembatanApk(
     fun isiLog(): String = LogWeb.isi()
 
     /**
+     * Foto KTP terakhir dari kamera, sebagai base64 JPEG.
+     *
+     * Jalur UTAMA foto KTP di perangkat yang WebView-nya selalu membaca hasil
+     * pemilih berkas sebagai 0 byte (itel S685LN — lihat [PemilihBerkas]).
+     * Kosong kalau belum ada foto baru. Satu arah, seperti isiLog: halaman
+     * hanya menerima foto yang aplikasi ini sendiri yang ambil.
+     */
+    @JavascriptInterface
+    fun fotoKtp(): String = PemilihBerkas.fotoKtpBase64 ?: ""
+
+    /**
      * Salinan laporan yang baru terkirim, disimpan di perangkat.
      *
      * Gunanya bukan arsip: kalau kasir menekan kirim lagi, isinya masih ada
