@@ -96,7 +96,10 @@ class MainActivity : AppCompatActivity() {
         // Dipakai `jalankanJs` untuk memanggil balik halaman (hasil cetak).
         webAktif = web
 
-        pemilih = PemilihBerkas(this) { pesan -> LogWeb.catat(web, pesan) } {
+        pemilih = PemilihBerkas(
+            this,
+            { pesan -> LogWeb.catat(web, pesan) },
+        ) {
             // WebView balik dari kamera OEM: timers mungkin masih ditahan dan
             // fokus tertinggal di jendela lama — tanpa ini Chromium menolak
             // membuka pemilih berkas berikutnya DIAM-DIAM (klik tak berreaksi,
