@@ -41,6 +41,18 @@ class JembatanApk(
     }
 
     /**
+     * Isi log sisi APK, diambil halaman web LANGSUNG saat menyusun laporan.
+     *
+     * Jalur lama (event `zxr-apk-log` live) rapuh: pesan yang terjadi saat
+     * halaman belum siap / saat WebView tak fokus hilang tanpa jejak —
+     * produksi 1.0.35–1.0.37: seluruh log kamera (baca coba N, kamera
+     * terdeteksi) tak pernah sampai laporan walau berkasnya sampai. Dengan
+     * pembacaan langsung ini laporan selalu memuat log APK terkini.
+     */
+    @JavascriptInterface
+    fun isiLog(): String = LogWeb.isi()
+
+    /**
      * Salinan laporan yang baru terkirim, disimpan di perangkat.
      *
      * Gunanya bukan arsip: kalau kasir menekan kirim lagi, isinya masih ada
