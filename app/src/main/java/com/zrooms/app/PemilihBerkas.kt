@@ -35,6 +35,8 @@ import java.io.File
 class PemilihBerkas(
     private val activity: AppCompatActivity,
     private val catat: (String) -> Unit,
+    /** Dipanggil saat balik dari kamera: WebView harus jadi fokus lagi (lihat [saatBalikDariKamera]). */
+    private val fokuskanWeb: () -> Unit,
 ) {
 
     /** Permintaan yang sedang menunggu. Lihat catatan [batal]. */
@@ -73,6 +75,9 @@ class PemilihBerkas(
             // memblokir SEMUA pemilih berkas sampai aplikasi ditutup (kasus
             // produksi 2026-10-03: klik kedua Kamera dan Pilih File mati total).
             kameraJalan = false
+            // WebView yang menunggu hasil harus jadi fokus lagi SEKARANG —
+            // bukan menunggu onResume activity (lihat [saatBalikDariKamera]).
+            saatBalikDariKamera()
 
             // Kamera dengan EXTRA_OUTPUT kerap membalas RESULT_OK tanpa data
             // (fotonya sudah ditulis ke URI milik kita). Jalur kamera dicek
@@ -350,5 +355,24 @@ class PemilihBerkas(
     fun lepas() {
         batal(null)
         tujuanKamera = null
+    }
+
+    /**
+     * WebView balik ke depan setelah kamera/pemilih ditutup — paksa WebView
+     * yang menunggu jadi fokus lagi.
+     *
+     * Kasus produksi 2026-10-03 (itel S685LN, Android 15, WebView 153): kamera
+     * dibuka 16:52 lalu sejak 17:32 SEMUA klik kamera DIAM — klik sampai ke
+     * `el.click()` (instrumentasi web `b6bf18d`) tapi `onShowFileChooser` tak
+     * pernah dipanggil lagi, bahkan setelah proses di-restart dan halaman
+     * dimuat ulang. Chromium menahan pemilih bila WebView yang menunggu bukan
+     * lagi jendela fokus; pemanggilan `onResume` saja tidak cukup karena
+     * resumeTimers masih ditahan oleh kamera OEM.
+     */
+    fun saatBalikDariKamera() {
+        activity.runOnUiThread {
+            fokuskanWeb()
+            catat("saatBalikDariKamera: resumeTimers+requestFocus dipanggil")
+        }
     }
 }

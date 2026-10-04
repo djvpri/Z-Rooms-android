@@ -96,7 +96,14 @@ class MainActivity : AppCompatActivity() {
         // Dipakai `jalankanJs` untuk memanggil balik halaman (hasil cetak).
         webAktif = web
 
-        pemilih = PemilihBerkas(this) { pesan -> LogWeb.catat(web, pesan) }
+        pemilih = PemilihBerkas(this) { pesan -> LogWeb.catat(web, pesan) } {
+            // WebView balik dari kamera OEM: timers mungkin masih ditahan dan
+            // fokus tertinggal di jendela lama — tanpa ini Chromium menolak
+            // membuka pemilih berkas berikutnya DIAM-DIAM (klik tak berreaksi,
+            // onShowFileChooser tak pernah dipanggil; kasus itel S685LN 2026-10-03).
+            web.resumeTimers()
+            web.requestFocus()
+        }
 
         // Bilah judul memuat nama aplikasi + VERSI. Sebelumnya versi menempel
         // sebagai banner di bawah layar dan menutupi dashboard — sekarang ia
@@ -304,6 +311,21 @@ class MainActivity : AppCompatActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         web.saveState(outState)
+    }
+
+    /**
+     * Aplikasi balik ke depan (kamera OEM ditutup, pemilih ditutup, kasir pindah
+     * aplikasi lalu balik). Chromium menahan pemilih berkas bila WebView yang
+     * menunggu bukan lagi jendela fokus — dan `resumeTimers` yang tertahan oleh
+     * kamera OEM tidak dikembalikan otomatis. Tanpa ini: klik Kamera berikutnya
+     * DIAM total, `onShowFileChooser` tak pernah dipanggil (itel S685LN,
+     * 2026-10-03: mati sejak kamera pertama ditutup 16:52, temuan log 17:32+).
+     */
+    override fun onResume() {
+        super.onResume()
+        web.resumeTimers()
+        web.requestFocus()
+        LogWeb.catat(web, "onResume: resumeTimers+requestFocus")
     }
 
     /** Bon dan nota diunduh lewat DownloadManager supaya muncul di notifikasi

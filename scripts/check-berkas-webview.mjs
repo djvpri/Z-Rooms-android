@@ -35,6 +35,23 @@ blok('onShowFileChooser dipasang', () =>
   assert.match(main, /override fun onShowFileChooser\(/,
     'tanpa ini <input type="file"> diam total — bug yang dilaporkan kasir'))
 
+blok('fokus WebView dikembalikan tiap balik dari kamera (fix klik diam)', () => {
+  // itel S685LN 2026-10-03: kamera dibuka 16:52, sejak 17:32 SEMUA klik kamera
+  // DIAM — onShowFileChooser tak pernah dipanggil lagi walau proses di-restart.
+  // Chromium menolak membuka pemilih bila WebView penunggu bukan jendela fokus.
+  assert.match(main, /override fun onResume\(\)[\s\S]{0,400}?web\.resumeTimers\(\)/,
+    'onResume tanpa resumeTimers — timers yang ditahan kamera OEM tak dikembalikan')
+  assert.match(main, /override fun onResume\(\)[\s\S]{0,400}?web\.requestFocus\(\)/,
+    'onResume tanpa requestFocus — WebView tak jadi jendela fokus lagi')
+  // Jalur hasil kamera (registerForActivityResult) ikut memanggil pemulihan
+  // fokus: dipanggil SEBELUM onResume activity sempat jalan.
+  assert.match(berkas, /kameraJalan = false[\s\S]{0,220}?saatBalikDariKamera\(\)/,
+    'jalur hasil kamera tak memulihkan fokus WebView')
+  // MainActivity menyambung lambda pemulihan fokus ke PemilihBerkas.
+  assert.match(main, /PemilihBerkas\(this\)[\s\S]{0,400}?resumeTimers\(\)[\s\S]{0,80}?requestFocus\(\)/,
+    'lambda fokuskanWeb tak dipasang — saatBalikDariKamera jadi no-op')
+})
+
 blok('hasil pemilih diteruskan balik ke WebView', () => {
   // Seluruh urusan pemilih berkas pindah ke PemilihBerkas: registrasi hasil
   // HARUS tanpa syarat di onCreate, dan kamera menerima berkas lewat URI.
