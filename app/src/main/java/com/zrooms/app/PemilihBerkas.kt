@@ -85,28 +85,44 @@ class PemilihBerkas(
             // berkas biasa.
             if (tujuan != null && cb != null) {
                 if (hasil.resultCode == Activity.RESULT_OK) {
-                    // Verifikasi nyata: kamera bisa membalas RESULT_OK padahal
-                    // fotonya gagal ditulis ke URI kita (fallback simpan ke
-                    // penyimpanan eksternalnya sendiri — sumber error "izin
-                    // ditolak tidak dapat menulis penyimpanan eksternal").
-                    // Ukuran berkas memberi tahu alasan sesungguhnya.
-                    val berkas = tujuan.path?.let { File(it) }
-                    val ukuran = berkas?.takeIf { it.exists() }?.length() ?: -1L
+                    // Kamera OEM (Transsion/itel) kerap MENGABAIKAN EXTRA_OUTPUT
+                    // ke cache-dir aplikasi dan menyimpan sendiri ke penyimpanan
+                    // eksternalnya — lalu gagal di izinnya sendiri ("izin ditolak,
+                    // tidak dapat menulis penyimpanan eksternal", produksi
+                    // 2026-10-03). Sejak 1.0.36 targetnya MediaStore (Pictures),
+                    // jalur yang kamera OEM selalu bisa tulis. Foto dibaca via
+                    // ContentResolver (berlaku utk MediaStore ATAU berkas), lalu
+                    // DISALIN ke berkas KTP internal; entri galeri dibersihkan.
+                    var ukuran = -1L
+                    try {
+                        activity.contentResolver.openInputStream(tujuan)?.use { masuk ->
+                            val berkasKtp = File(File(activity.cacheDir, "ktp-foto").apply { mkdirs() }, "ktp.jpg")
+                            berkasKtp.outputStream().use { keluar -> masuk.copyTo(keluar) }
+                            ukuran = berkasKtp.length()
+                            catat("kamera selesai: foto tersalin ke ${berkasKtp.path} ($ukuran byte)")
+                        } ?: catat("kamera: resolver tak bisa buka $tujuan")
+                    } catch (e: Exception) {
+                        catat("kamera: salin GAGAL: ${e.javaClass.simpleName}: ${e.message}")
+                    }
                     if (ukuran <= 0L) {
                         catat(
-                            "KAMERA GAGAL TULIS FOTO: RESULT_OK tapi berkas tak ada/0 byte " +
-                                "(path=${tujuan.path}, ada=${berkas?.exists()}, ukuran=$ukuran). " +
-                                "Kemungkinan grant URI tak sampai ke kamera — kamera menulis " +
-                                "ke penyimpanannya sendiri dan gagal (error 'izin ditolak " +
-                                "penyimpanan eksternal'). Cek baris 'kamera terdeteksi' di atas."
+                            "KAMERA GAGAL TULIS FOTO: RESULT_OK tapi foto tak terbaca " +
+                                "(tujuan=$tujuan). Kamera OEM menulis ke penyimpanannya " +
+                                "sendiri dan gagal (error 'izin ditolak penyimpanan eksternal')."
                         )
+                        bersihkanTargetKamera(tujuan)
                         batal("Kamera gagal menyimpan foto. Coba lagi, atau pilih dari galeri.")
                         return@registerForActivityResult
                     }
-                    catat("kamera selesai: foto tersimpan di ${tujuan.path} ($ukuran byte)")
-                    cb.onReceiveValue(arrayOf(tujuan))
+                    bersihkanTargetKamera(tujuan)
+                    // Balas URI berkas internal (content:// FileProvider) ke web:
+                    // WebView/mesin cetak hanya butuh URI yang bisa dibaca lokal.
+                    val uriKtp = FileProvider.getUriForFile(activity, "${activity.packageName}.berkas",
+                        File(File(activity.cacheDir, "ktp-foto"), "ktp.jpg"))
+                    cb.onReceiveValue(arrayOf(uriKtp))
                 } else {
                     catat("kamera dibatalkan kasir (kode=${hasil.resultCode})")
+                    bersihkanTargetKamera(tujuan)
                     cb.onReceiveValue(null)
                 }
                 return@registerForActivityResult
@@ -228,9 +244,9 @@ class PemilihBerkas(
             callback.onReceiveValue(null)
             return
         }
-        val tujuan = try {
-            val berkas = File(File(activity.cacheDir, "ktp-foto").apply { mkdirs() }, "ktp.jpg")
-            FileProvider.getUriForFile(activity, "${activity.packageName}.berkas", berkas)
+        val tujuan: Uri
+        try {
+            tujuan = siapkanTargetKamera() ?: return
         } catch (e: Exception) {
             catat("siapkan kamera GAGAL: ${e.javaClass.simpleName}: ${e.message}")
             batal("Kamera tidak bisa disiapkan di perangkat ini.")
@@ -373,6 +389,52 @@ class PemilihBerkas(
         activity.runOnUiThread {
             fokuskanWeb()
             catat("saatBalikDariKamera: resumeTimers+requestFocus dipanggil")
+        }
+    }
+
+    /**
+     * Target foto kamera via MediaStore (galeri Android baku).
+     *
+     * Sejak 1.0.36: kamera OEM Transsion/itel ternyata MENGABAIKAN target
+     * cache-dir via FileProvider (produksi 2026-10-03: RESULT_OK tapi foto tak
+     * ada + toast 'izin ditolak, tidak dapat menulis penyimpanan eksternal' —
+     * kamera mundur menyimpan ke penyimpanannya sendiri dan kena izinnya
+     * sendiri), padahal memotret manual dari ikon kamera selalu sukses.
+     * MediaStore di Pictures adalah jalur yang kamera OEM selalu bisa tulis.
+     *
+     * Android < 10 tak punya MediaStore API Modern → tetap jalur lama
+     * (cache-dir + FileProvider; di perangkat lama grant-nya bekerja).
+     */
+    private fun siapkanTargetKamera(): Uri? {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) {
+            val berkas = File(File(activity.cacheDir, "ktp-foto").apply { mkdirs() }, "ktp.jpg")
+            return FileProvider.getUriForFile(activity, "${activity.packageName}.berkas", berkas)
+        }
+        val nilai = android.content.ContentValues().apply {
+            put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, "zrooms-ktp-${System.currentTimeMillis()}.jpg")
+            put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+            put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, android.os.Environment.DIRECTORY_PICTURES + "/Z-Rooms")
+        }
+        return activity.contentResolver.insert(
+            android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, nilai
+        ) ?: run {
+            catat("MediaStore insert GAGAL — mundur ke cache-dir")
+            val berkas = File(File(activity.cacheDir, "ktp-foto").apply { mkdirs() }, "ktp.jpg")
+            FileProvider.getUriForFile(activity, "${activity.packageName}.berkas", berkas)
+        }
+    }
+
+    /** Hapus sisa target kamera: entri MediaStore (galeri) atau berkas cache. */
+    private fun bersihkanTargetKamera(uri: Uri) {
+        try {
+            if (uri.scheme == "content" &&
+                uri.authority == "media" &&
+                activity.contentResolver.delete(uri, null, null) > 0
+            ) {
+                catat("kamera: entri galeri dibersihkan")
+            }
+        } catch (e: Exception) {
+            catat("kamera: bersih galeri GAGAL: ${e.javaClass.simpleName}: ${e.message}")
         }
     }
 }
