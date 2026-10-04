@@ -93,22 +93,31 @@ class PemilihBerkas(
                     // jalur yang kamera OEM selalu bisa tulis. Foto dibaca via
                     // ContentResolver (berlaku utk MediaStore ATAU berkas), lalu
                     // DISALIN ke berkas KTP internal; entri galeri dibersihkan.
+                    //
+                    // 1.0.37: produksi 03:14 — kamera itel membalas RESULT_OK
+                    // SEBELUM tulisan MediaStore-nya flush: URI terbaca tapi
+                    // isinya 0 byte → WebView deliver berkas kosong → web
+                    // "failed to fetch". Baca pakai RETRY: 3× jeda 0,5 dtk,
+                    // hanya deliver kalau ada isi nyata.
+                    val berkasKtp = File(File(activity.cacheDir, "ktp-foto").apply { mkdirs() }, "ktp.jpg")
                     var ukuran = -1L
-                    try {
-                        activity.contentResolver.openInputStream(tujuan)?.use { masuk ->
-                            val berkasKtp = File(File(activity.cacheDir, "ktp-foto").apply { mkdirs() }, "ktp.jpg")
-                            berkasKtp.outputStream().use { keluar -> masuk.copyTo(keluar) }
-                            ukuran = berkasKtp.length()
-                            catat("kamera selesai: foto tersalin ke ${berkasKtp.path} ($ukuran byte)")
-                        } ?: catat("kamera: resolver tak bisa buka $tujuan")
-                    } catch (e: Exception) {
-                        catat("kamera: salin GAGAL: ${e.javaClass.simpleName}: ${e.message}")
+                    for (coba in 1..3) {
+                        try {
+                            activity.contentResolver.openInputStream(tujuan)?.use { masuk ->
+                                berkasKtp.outputStream().use { keluar -> masuk.copyTo(keluar) }
+                            } ?: catat("kamera: resolver tak bisa buka $tujuan (coba $coba)")
+                        } catch (e: Exception) {
+                            catat("kamera: salin GAGAL (coba $coba): ${e.javaClass.simpleName}: ${e.message}")
+                        }
+                        ukuran = berkasKtp.length()
+                        catat("kamera: baca coba $coba → $ukuran byte")
+                        if (ukuran > 0L) break
+                        if (coba < 3) Thread.sleep(500)
                     }
                     if (ukuran <= 0L) {
                         catat(
-                            "KAMERA GAGAL TULIS FOTO: RESULT_OK tapi foto tak terbaca " +
-                                "(tujuan=$tujuan). Kamera OEM menulis ke penyimpanannya " +
-                                "sendiri dan gagal (error 'izin ditolak penyimpanan eksternal')."
+                            "KAMERA GAGAL TULIS FOTO: RESULT_OK tapi foto tetap 0 byte " +
+                                "setelah 3 coba (tujuan=$tujuan). Kamera belum flush/menulis."
                         )
                         bersihkanTargetKamera(tujuan)
                         batal("Kamera gagal menyimpan foto. Coba lagi, atau pilih dari galeri.")
